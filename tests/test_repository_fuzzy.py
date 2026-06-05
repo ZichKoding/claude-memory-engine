@@ -43,3 +43,25 @@ def test_fuzzy_revives_archived_row(conn, clock):
     assert out.from_archived is True
     row = conn.execute("SELECT status FROM memories WHERE id=?", (first.id,)).fetchone()
     assert row["status"] == "active"  # revived
+
+
+def test_fuzzy_merges_same_type_even_when_other_type_outranks(conn, clock):
+    repo = MemoryRepository(conn, clock=clock)
+    # A short FACT that outranks on bm25, and a longer PREFERENCE, same scope + tokens.
+    fact = repo.capture_or_merge(
+        Parsed("fact", "zm fact", "d", "zebra mango"), scope="global")
+    pref = repo.capture_or_merge(
+        Parsed("preference", "zm pref", "d", "zebra mango lantern velvet copper ridge"),
+        scope="global")
+    assert isinstance(fact, Inserted)
+    assert isinstance(pref, Inserted)
+    assert conn.execute("SELECT COUNT(*) c FROM memories").fetchone()["c"] == 2
+
+    # New PREFERENCE capture must merge into the preference row, not insert a third,
+    # even though the fact row ranks higher on bm25 for these tokens.
+    clock.now += 5
+    out = repo.capture_or_merge(
+        Parsed("preference", "zm pref2", "d", "zebra mango"), scope="global")
+    assert isinstance(out, MergedByFuzzy)
+    assert out.id == pref.id
+    assert conn.execute("SELECT COUNT(*) c FROM memories").fetchone()["c"] == 2
