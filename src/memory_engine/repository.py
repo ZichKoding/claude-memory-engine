@@ -5,10 +5,13 @@ from typing import Callable
 
 from memory_engine.fts_query import from_user_text
 from memory_engine.models import (
-    STATUS_ACTIVE, STATUS_ARCHIVED, Inserted, MergedByFuzzy, MergedByKey, Outcome,
+    STATUS_ACTIVE, STATUS_ARCHIVED, Inserted, Memory, MergedByFuzzy, MergedByKey, Outcome,
 )
 from memory_engine.normalizer import normalized_key
 from memory_engine.parser import Parsed
+
+ARCHIVE_AFTER_DAYS = 365
+_DAY_MS = 86_400_000
 
 
 class MemoryRepository:
@@ -74,3 +77,55 @@ class MemoryRepository:
         if row is None or row["type"] != type_:
             return None
         return row["id"]
+
+    def search(self, text: str, scopes: list[str], limit: int,
+               status: str = STATUS_ACTIVE) -> list[Memory]:
+        """Scope-filtered FTS search ranked by bm25. Empty list when text yields no
+        usable query. (bm25 gating/threshold is Phase 2 — this returns raw matches.)"""
+        fuzzy = from_user_text(text)
+        if fuzzy is None or not scopes:
+            return []
+        placeholders = ",".join("?" for _ in scopes)
+        sql = (
+            "SELECT m.* FROM memories m JOIN memories_fts f ON f.rowid=m.id "
+            f"WHERE memories_fts MATCH ? AND m.status=? AND m.scope IN ({placeholders}) "
+            "ORDER BY bm25(memories_fts) ASC LIMIT ?"
+        )
+        try:
+            rows = self._conn.execute(sql, (fuzzy, status, *scopes, limit)).fetchall()
+        except sqlite3.OperationalError:
+            return []
+        return [self._to_memory(r) for r in rows]
+
+    def bump_recall(self, ids: list[int]) -> None:
+        """Bump recallHits + lastUsedAt and revive (status='active') served rows."""
+        if not ids:
+            return
+        now = self._clock()
+        placeholders = ",".join("?" for _ in ids)
+        self._conn.execute(
+            f"UPDATE memories SET recallHits=recallHits+1, lastUsedAt=?, status='active' "
+            f"WHERE id IN ({placeholders})",
+            (now, *ids),
+        )
+        self._conn.commit()
+
+    def run_archival_sweep(self) -> int:
+        """Flip active rows idle past the window to archived. Returns count."""
+        cutoff = self._clock() - ARCHIVE_AFTER_DAYS * _DAY_MS
+        cur = self._conn.execute(
+            "UPDATE memories SET status='archived' WHERE status='active' AND lastUsedAt < ?",
+            (cutoff,),
+        )
+        self._conn.commit()
+        return cur.rowcount
+
+    @staticmethod
+    def _to_memory(r: sqlite3.Row) -> Memory:
+        return Memory(
+            id=r["id"], scope=r["scope"], type=r["type"], name=r["name"],
+            description=r["description"], body=r["body"], normalizedKey=r["normalizedKey"],
+            captureHits=r["captureHits"], recallHits=r["recallHits"],
+            lastUsedAt=r["lastUsedAt"], status=r["status"], createdAt=r["createdAt"],
+            updatedAt=r["updatedAt"], source=r["source"],
+        )
