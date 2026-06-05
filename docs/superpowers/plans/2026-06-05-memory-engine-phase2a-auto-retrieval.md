@@ -147,7 +147,7 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'memory_engine.scope'`
 ```python
 # src/memory_engine/scope.py
 """Resolve the project scope key for a working directory. The key is the git repo
-root (so shenron and senku are distinct scopes), normcased+absolute so it's stable;
+root (so different repos are distinct scopes), normcased+absolute so it's stable;
 falls back to the normalized cwd when there's no repo. Reading the path never writes
 to the repo."""
 import os

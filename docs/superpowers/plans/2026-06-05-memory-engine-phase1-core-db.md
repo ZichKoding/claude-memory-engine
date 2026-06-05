@@ -72,7 +72,7 @@ uniformly — no `PYTHONPATH` hacks. `uv` installs the `dev` dependency group by
 [project]
 name = "memory-engine"
 version = "0.1.0"
-description = "Shenron-style memory engine for Claude Code"
+description = "Local SQLite memory engine for Claude Code"
 requires-python = ">=3.10"
 
 [project.scripts]

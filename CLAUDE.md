@@ -1,6 +1,6 @@
 # claude-memory-engine
 
-A Shenron-style memory engine for Claude Code: a standalone SQLite layer (FTS5 + bm25
+A local memory engine for Claude Code: a standalone SQLite layer (FTS5 + bm25
 + counters + lifecycle) that surfaces relevant memories per turn at global and
 project scope. **Decoupled** from Claude Code's `MEMORY.md` — purely additive.
 

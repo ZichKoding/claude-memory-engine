@@ -6,7 +6,7 @@
 
 ## Summary
 
-A Shenron-style memory engine for Claude Code: a standalone SQLite layer that, at
+A local memory engine for Claude Code: a standalone SQLite layer that, at
 each turn and on demand, runs fuzzy (FTS5/bm25) and exact searches for memories
 relevant to the current context — at both **global** and **current-project** scope —
 and injects the strong matches into context. It has its own capture, dedup, counters,
@@ -17,10 +17,10 @@ work exactly as it does today (hand/Claude-curated, loaded once per session). Th
 engine is purely additive. If it misbehaves, it can be turned off with one flag and
 the session reverts to today's behavior with zero data loss.
 
-This design ports the parts of Shenron's memory system the user values:
+This design ports the parts of a proven on-device memory design we value:
 `captureOrMerge` two-stage dedup, `captureHits`/`recallHits`/`lastUsedAt` counters,
 FTS5/bm25 retrieval, and the active/archived lifecycle — adapted for Claude Code and
-extended with a two-level (global + project) scope axis Shenron does not have.
+extended with a two-level (global + project) scope axis the reference design lacks.
 
 ## Goals
 
@@ -34,7 +34,7 @@ extended with a two-level (global + project) scope axis Shenron does not have.
 
 ## Non-Goals (explicitly deferred)
 
-- **HDC associative layer.** Theoretical/under test in Shenron; not in this build.
+- **HDC associative layer.** Theoretical/under test elsewhere; not in this build.
 - **MEMORY.md changes of any kind.** Left completely alone.
 - **MEMORY.md ↔ DB derivation/sync/promotion pipeline.** The two systems are
   independent. (An optional "skip injecting rows already substantially present in
@@ -105,9 +105,9 @@ as `memory.db` in the global path-keyed `~/.claude` dir.
 **Indices:** UNIQUE(`normalizedKey`), plus `scope`, `type`, `status`, `lastUsedAt`.
 
 **FTS5:** external-content virtual table `memories_fts` over (`name`, `description`,
-`body`), kept in sync by insert/update/delete triggers. (Same setup as Shenron.)
+`body`), kept in sync by insert/update/delete triggers. (Standard FTS5 external-content setup.)
 
-### Normalization & dedup (from Shenron, made scope-aware)
+### Normalization & dedup (scope-aware)
 
 - `normalizeBody`: lowercase, strip non-alphanumerics to spaces, collapse whitespace,
   trim.
@@ -139,7 +139,7 @@ Four touchpoints:
 ### ③ `recall_memory` tool — explicit deep search, as needed
 - Searches **active + archived**, **no bm25 gate**, both scopes.
 - Auto-revives archived hits (bumps recall + flips to active).
-- Mirrors Shenron's `retrieveExplicit`.
+- Provides an explicit-recall path.
 
 ### ④ Capture — hybrid, all through `captureOrMerge`
 - **Inline:** `memory_add` tool Claude calls mid-session when it judges something
@@ -184,7 +184,7 @@ rare safety valve, not the primary path.
 
 - **Python**, stdlib `sqlite3` + FTS5. Hooks are plain executables.
 - Pure-logic modules (normalizer, FtsQuery, candidate parser, captureOrMerge core)
-  kept dependency-free and trivially unit-testable — same discipline Shenron used by
+  kept dependency-free and trivially unit-testable — the same dependency-isolation discipline used by
   isolating its pure-Kotlin helpers from Android.
 - Windows-clean paths and invocation (user is on Windows).
 
@@ -194,23 +194,23 @@ rare safety valve, not the primary path.
   candidate `parse`, `captureOrMerge` outcomes (insert / merge-by-key /
   merge-by-fuzzy), **scope isolation** (project capture never merges into global),
   archival→revive, counter bumps. In-memory SQLite for DAO tests; injected clock for
-  time-based logic (Shenron pattern).
+  time-based logic (injected-clock pattern).
 - **Integration:** hook scripts invoked with sample Claude Code payloads.
 
 ## Tunable Constants (initial defaults)
 
 All are constants in code to start; surfaced as settings only if real usage shows the
-static value is wrong (Shenron's approach).
+static value is wrong (constants-first approach).
 
 | constant | default | meaning |
 |----------|---------|---------|
-| `ARCHIVE_AFTER_DAYS` | 365 | idle window before active → archived (Shenron's value) |
+| `ARCHIVE_AFTER_DAYS` | 365 | idle window before active → archived (chosen default) |
 | `RAG_INJECT_THRESHOLD` | -1.0 | bm25 gate for auto-injection; more-negative = stricter. Conservative start — tune to -3.0/-6.0 as the pile grows |
 | `RETRIEVE_K` | 5 | max rows injected per turn (auto) and per explicit recall |
 | `MAX_MEMORIES_PER_SWEEP` | 5 | cap on candidates from one session-end extraction pass |
 | `BACKUP_STALE_HOURS` | 24 | min age before backup-on-boot fires |
 | `BACKUP_RETENTION` | 7 | timestamped backups kept (oldest pruned) |
-| field length caps | name ≤ 80, description ≤ 200, body ≤ 500 | bound a runaway memory (Shenron's caps) |
+| field length caps | name ≤ 80, description ≤ 200, body ≤ 500 | bound a runaway memory (chosen caps) |
 
 ## Build Phasing
 
