@@ -1,5 +1,6 @@
 # src/memory_engine/repository.py
 """Capture + dedup surface over the SQLite store. Clock injected for tests."""
+import dataclasses
 import sqlite3
 from typing import Callable
 
@@ -12,6 +13,7 @@ from memory_engine.parser import Parsed
 
 ARCHIVE_AFTER_DAYS = 365
 _DAY_MS = 86_400_000
+RETRIEVE_K = 5
 
 
 class MemoryRepository:
@@ -98,6 +100,27 @@ class MemoryRepository:
         except sqlite3.OperationalError:
             return []
         return [self._to_memory(r) for r in rows]
+
+    def retrieve(self, text: str, scopes: list[str], k: int = RETRIEVE_K) -> list[Memory]:
+        """Auto-retrieval: the best-k bm25 matches across the given scopes, active
+        first. If the active set is empty, fall back to archived and revive the hits.
+        Bumps recallHits on everything served, best-first.
+
+        No absolute score cutoff: bm25 magnitude is corpus-dependent (rejected in plan
+        red-team), so calibrated relevance gating is deferred to a Phase 4 tuning pass.
+        FTS MATCH already requires token overlap and k caps the count."""
+        active = self.search(text, scopes, k, STATUS_ACTIVE)
+        if active:
+            self.bump_recall([m.id for m in active])
+            return active
+        archived = self.search(text, scopes, k, STATUS_ARCHIVED)
+        if not archived:
+            return []
+        now = self._clock()
+        self.bump_recall([m.id for m in archived])  # also flips status='active'
+        return [dataclasses.replace(m, status=STATUS_ACTIVE,
+                                    recallHits=m.recallHits + 1, lastUsedAt=now)
+                for m in archived]
 
     def bump_recall(self, ids: list[int]) -> None:
         """Bump recallHits + lastUsedAt and revive (status='active') served rows."""
