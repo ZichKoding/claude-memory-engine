@@ -586,7 +586,7 @@ the model. It is a manual verification task (no new unit tests).
 
 The editable install tracks the working tree, but reinstall to be certain the new
 subcommand is registered:
-Run: `uv tool install --editable --force "C:/Users/zichk/Desktop/projects/claude-memory-engine"`
+Run (from the repo root): `uv tool install --editable --force .`
 Then verify the subcommand exists:
 Run: `memory-engine inject --help`
 Expected: argparse shows `inject` (no error).
@@ -596,7 +596,7 @@ Expected: argparse shows `inject` (no error).
 Seed a memory in the REAL default DB, then pipe a hook-shaped payload to `inject`:
 ```bash
 memory-engine add --scope global --type preference --name "Pizza topping" --description "fav" --body "the user's favorite pizza topping is pineapple"
-echo '{"prompt":"what is my favorite pizza topping","cwd":"C:/Users/zichk/Desktop/projects","hook_event_name":"UserPromptSubmit"}' | memory-engine inject
+echo '{"prompt":"what is my favorite pizza topping","cwd":"/path/to/a/project","hook_event_name":"UserPromptSubmit"}' | memory-engine inject
 ```
 Expected: a single line of JSON with `hookSpecificOutput.additionalContext` containing
 `<memory>` and `pineapple`. Confirm exit code is 0: `echo $?` → `0`.

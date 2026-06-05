@@ -81,7 +81,9 @@ project scope. **Decoupled** from Claude Code's `MEMORY.md` — purely additive.
 - The engine is installed globally as a `uv` tool (`uv tool install --editable .`),
   exposing `memory-engine` on PATH so the hook runs in any project.
 - Auto-retrieval is wired via a **`UserPromptSubmit` hook** in `~/.claude/settings.json`
-  (outside this repo) that runs `C:/Users/zichk/.local/bin/memory-engine.exe inject`.
+  (outside this repo) that runs `memory-engine inject` (the global uv-tool shim; on
+  Windows the settings use the absolute path `~/.local/bin/memory-engine.exe` for
+  reliable resolution).
   On each prompt it injects scope-merged top-k memories as
   `hookSpecificOutput.additionalContext`, and is fail-open (always exit 0) so it can
   never block a turn.
