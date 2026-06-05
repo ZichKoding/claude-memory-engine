@@ -806,17 +806,19 @@ Then add these methods to the class:
 
 ```python
     def _find_fuzzy_candidate(self, fuzzy: str, scope: str, type_: str, status: str):
-        """First same-scope+type FTS hit at the given status, or None."""
+        """First same-scope+type FTS hit at the given status, or None. The type
+        filter is in SQL (not a post-LIMIT-1 Python check) so the best bm25 row of
+        the CORRECT type is returned even when a different-type row outranks it."""
         try:
             row = self._conn.execute(
-                "SELECT m.id, m.type FROM memories m JOIN memories_fts f ON f.rowid=m.id "
-                "WHERE memories_fts MATCH ? AND m.scope=? AND m.status=? "
+                "SELECT m.id FROM memories m JOIN memories_fts f ON f.rowid=m.id "
+                "WHERE memories_fts MATCH ? AND m.scope=? AND m.status=? AND m.type=? "
                 "ORDER BY bm25(memories_fts) ASC LIMIT 1",
-                (fuzzy, scope, status),
+                (fuzzy, scope, status, type_),
             ).fetchone()
         except sqlite3.OperationalError:
             return None  # malformed MATCH — treat as no candidate
-        if row is None or row["type"] != type_:
+        if row is None:
             return None
         return row["id"]
 ```
