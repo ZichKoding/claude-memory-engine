@@ -26,7 +26,7 @@ src/memory_engine/
   paths.py        # NEW: default_db_path()
   scope.py        # NEW: resolve_scope_key(), scopes_for()
   formatting.py   # NEW: format_memory_block()
-  repository.py   # MODIFY: RETRIEVE_K, RAG_INJECT_THRESHOLD, _search_scored, retrieve
+  repository.py   # MODIFY: RETRIEVE_K + retrieve (reuses Phase 1 search)
   cli.py          # MODIFY: --db optional (default default_db_path()); add `inject` subcommand
 tests/
   test_paths.py            # NEW
@@ -228,10 +228,12 @@ def test_retrieve_merges_scopes_and_excludes_others(conn, clock):
 
 def test_retrieve_returns_best_k_ordered(conn, clock):
     repo = MemoryRepository(conn, clock=clock)
-    # Three matching rows; ask for top 2 — retrieve caps at k and orders by bm25.
-    _add(repo, "global", "alpha bravo charlie delta echo foxtrot")  # fullest overlap
-    _add(repo, "global", "alpha bravo charlie")
-    _add(repo, "global", "alpha")
+    # Three matching rows with DISTINCT types so capture-time fuzzy dedup (which is
+    # scope+type-constrained) keeps them as separate rows. Retrieval filters on
+    # scope+status only (not type), so all three are still searched and bm25-ranked.
+    _add(repo, "global", "alpha bravo charlie delta echo foxtrot", type_="fact")  # fullest overlap
+    _add(repo, "global", "alpha bravo charlie", type_="preference")
+    _add(repo, "global", "alpha", type_="person")
     out = repo.retrieve("alpha bravo charlie delta echo foxtrot", scopes=["global"], k=2)
     assert len(out) == 2                 # capped at k
     assert "foxtrot" in out[0].body      # best (all-6-token) match ranks first
@@ -250,8 +252,10 @@ def test_retrieve_bumps_recall_on_served(conn, clock):
 
 def test_retrieve_active_takes_precedence_over_archived(conn, clock):
     repo = MemoryRepository(conn, clock=clock)
-    active = _add(repo, "global", "alpha bravo charlie delta echo")
-    archived = _add(repo, "global", "alpha bravo charlie delta echo foxtrot golf")
+    # Distinct types so BOTH rows survive dedup — else they'd merge into one and this
+    # would silently exercise the fallback path instead of active-precedence.
+    active = _add(repo, "global", "alpha bravo charlie delta echo", type_="fact")
+    archived = _add(repo, "global", "alpha bravo charlie delta echo foxtrot golf", type_="preference")
     conn.execute("UPDATE memories SET status='archived' WHERE id=?", (archived.id,))
     conn.commit()
     out = repo.retrieve("alpha bravo charlie delta echo", scopes=["global"], k=10)
@@ -329,7 +333,7 @@ Expected: PASS (6 passed). Then `uv run pytest -q` — full suite still green.
 
 ```bash
 git add src/memory_engine/repository.py tests/test_repository_retrieve.py
-git commit -m "feat: bm25-gated retrieve (scope-merged, archived fallback + revive)
+git commit -m "feat: top-k bm25 retrieve (scope-merged, archived fallback + revive)
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ```
