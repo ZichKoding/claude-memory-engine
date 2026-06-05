@@ -6,7 +6,7 @@
 
 **Architecture:** Dependency-free Python modules over stdlib `sqlite3` + FTS5. Pure-logic helpers (normalizer, FTS query sanitizer, candidate parser) are isolated and unit-tested in isolation. A `MemoryRepository` wraps a `sqlite3.Connection` with an injected clock and implements the two-stage dedup (hard-key, then fuzzy-FTS constrained to same scope+type). A small argparse CLI (`add`/`list`/`search`/`sweep`/`stats`) drives it manually.
 
-**Tech Stack:** Python 3 (stdlib `sqlite3`, `hashlib`, `re`, `argparse`, `dataclasses`); `pytest` for tests. Windows-clean (`python -m pytest`).
+**Tech Stack:** Python 3 (stdlib `sqlite3`, `hashlib`, `re`, `argparse`, `dataclasses`); `pytest` for tests, environment managed with **uv**. All project commands run via `uv run …` (uv resolves the interpreter and the editable install). Any bare interpreter invocation uses the Windows **`py`** launcher, never `python`.
 
 **Reference:** Spec at `docs/superpowers/specs/2026-06-05-claude-code-memory-engine-design.md`. This plan covers the spec's **Build Phasing → Phase 1** only. Retrieval policy/bm25 gating, hooks, capture wiring, backups, and kill switch are Phases 2–4.
 
@@ -16,8 +16,8 @@
 
 ```
 claude-memory-engine/
-  pyproject.toml                  # package + pytest config
-  requirements-dev.txt            # pytest
+  pyproject.toml                  # package + build-system + uv dev deps + pytest config
+  uv.lock                         # generated + committed by uv
   .gitignore
   src/memory_engine/
     __init__.py
@@ -62,13 +62,11 @@ backups/
 .venv/
 ```
 
-- [ ] **Step 2: Create `requirements-dev.txt`**
+- [ ] **Step 2: Create `pyproject.toml`**
 
-```text
-pytest>=8.0
-```
-
-- [ ] **Step 3: Create `pyproject.toml`**
+The `[build-system]` + `[tool.hatch...]` block makes `memory_engine` an installable
+(editable) package, so `uv run` resolves imports for pytest, `python -c`, and the CLI
+uniformly — no `PYTHONPATH` hacks. `uv` installs the `dev` dependency group by default.
 
 ```toml
 [project]
@@ -77,12 +75,24 @@ version = "0.1.0"
 description = "Shenron-style memory engine for Claude Code"
 requires-python = ">=3.10"
 
+[project.scripts]
+memory-engine = "memory_engine.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/memory_engine"]
+
 [tool.pytest.ini_options]
-pythonpath = ["src"]
 testpaths = ["tests"]
 ```
 
-- [ ] **Step 4: Create empty `src/memory_engine/__init__.py` and `tests/__init__.py`**
+- [ ] **Step 3: Create empty `src/memory_engine/__init__.py` and `tests/__init__.py`**
 
 ```python
 # src/memory_engine/__init__.py
@@ -92,10 +102,16 @@ testpaths = ["tests"]
 # tests/__init__.py
 ```
 
-- [ ] **Step 5: Install dev deps and verify pytest runs (collects nothing)**
+- [ ] **Step 4: Create the uv environment + editable install of the package**
 
-Run: `python -m pip install -r requirements-dev.txt; python -m pytest -q`
-Expected: `no tests ran` (exit 5) — confirms pytest + pythonpath wiring.
+Run: `uv sync`
+Expected: uv creates `.venv` and `uv.lock`, installs `pytest`, and installs
+`memory-engine` editable. (Re-running is idempotent.)
+
+- [ ] **Step 5: Verify pytest runs under uv (collects nothing)**
+
+Run: `uv run pytest -q`
+Expected: `no tests ran` (exit 5) — confirms pytest + package wiring under uv.
 
 - [ ] **Step 6: Commit**
 
@@ -143,7 +159,7 @@ def test_key_differs_by_type():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest tests/test_normalizer.py -q`
+Run: `uv run pytest tests/test_normalizer.py -q`
 Expected: FAIL — `ModuleNotFoundError: No module named 'memory_engine.normalizer'`
 
 - [ ] **Step 3: Write minimal implementation**
@@ -175,7 +191,7 @@ def normalized_key(scope: str, type_: str, body: str) -> str:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `python -m pytest tests/test_normalizer.py -q`
+Run: `uv run pytest tests/test_normalizer.py -q`
 Expected: PASS (5 passed)
 
 - [ ] **Step 5: Commit**
@@ -220,7 +236,7 @@ def test_returns_none_when_nothing_usable():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest tests/test_fts_query.py -q`
+Run: `uv run pytest tests/test_fts_query.py -q`
 Expected: FAIL — `ModuleNotFoundError: No module named 'memory_engine.fts_query'`
 
 - [ ] **Step 3: Write minimal implementation**
@@ -253,7 +269,7 @@ def from_user_text(raw: str) -> str | None:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `python -m pytest tests/test_fts_query.py -q`
+Run: `uv run pytest tests/test_fts_query.py -q`
 Expected: PASS (4 passed)
 
 - [ ] **Step 5: Commit**
@@ -307,7 +323,7 @@ def test_rejects_overlong_fields():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest tests/test_parser.py -q`
+Run: `uv run pytest tests/test_parser.py -q`
 Expected: FAIL — `ModuleNotFoundError: No module named 'memory_engine.parser'`
 
 - [ ] **Step 3: Write minimal implementation**
@@ -362,7 +378,7 @@ def parse_candidates(output: str) -> list[Parsed]:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `python -m pytest tests/test_parser.py -q`
+Run: `uv run pytest tests/test_parser.py -q`
 Expected: PASS (5 passed)
 
 - [ ] **Step 5: Commit**
@@ -429,7 +445,7 @@ Outcome = Inserted | MergedByKey | MergedByFuzzy
 
 - [ ] **Step 2: Verify it imports**
 
-Run: `python -c "import sys; sys.path.insert(0,'src'); import memory_engine.models; print('ok')"`
+Run: `uv run python -c "import memory_engine.models; print('ok')"`
 Expected: `ok`
 
 - [ ] **Step 3: Commit**
@@ -506,7 +522,7 @@ def test_init_db_is_idempotent(conn):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest tests/test_db.py -q`
+Run: `uv run pytest tests/test_db.py -q`
 Expected: FAIL — `ModuleNotFoundError: No module named 'memory_engine.db'`
 
 - [ ] **Step 3: Write minimal implementation**
@@ -576,7 +592,7 @@ def init_db(conn: sqlite3.Connection) -> None:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `python -m pytest tests/test_db.py -q`
+Run: `uv run pytest tests/test_db.py -q`
 Expected: PASS (3 passed)
 
 - [ ] **Step 5: Commit**
@@ -634,7 +650,7 @@ def test_different_scope_does_not_merge(conn, clock):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest tests/test_repository_capture.py -q`
+Run: `uv run pytest tests/test_repository_capture.py -q`
 Expected: FAIL — `ModuleNotFoundError: No module named 'memory_engine.repository'`
 
 - [ ] **Step 3: Write minimal implementation**
@@ -694,7 +710,7 @@ class MemoryRepository:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `python -m pytest tests/test_repository_capture.py -q`
+Run: `uv run pytest tests/test_repository_capture.py -q`
 Expected: PASS (2 passed)
 
 - [ ] **Step 5: Commit**
@@ -764,7 +780,7 @@ def test_fuzzy_revives_archived_row(conn, clock):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest tests/test_repository_fuzzy.py -q`
+Run: `uv run pytest tests/test_repository_fuzzy.py -q`
 Expected: FAIL — both `MergedByFuzzy` assertions fail (currently inserts a 2nd row)
 
 - [ ] **Step 3: Add the fuzzy stage + search helper to `repository.py`**
@@ -807,7 +823,7 @@ Then add these methods to the class:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `python -m pytest tests/test_repository_fuzzy.py tests/test_repository_capture.py -q`
+Run: `uv run pytest tests/test_repository_fuzzy.py tests/test_repository_capture.py -q`
 Expected: PASS (5 passed) — fuzzy tests pass, Task 6 tests still green
 
 - [ ] **Step 5: Commit**
@@ -881,7 +897,7 @@ def test_bump_recall_revives_archived(conn, clock):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest tests/test_repository_lifecycle.py -q`
+Run: `uv run pytest tests/test_repository_lifecycle.py -q`
 Expected: FAIL — `ImportError: cannot import name 'ARCHIVE_AFTER_DAYS'` / missing methods
 
 - [ ] **Step 3: Add constants, `search`, `bump_recall`, `run_archival_sweep` to `repository.py`**
@@ -954,7 +970,7 @@ Add these methods to the class:
 
 - [ ] **Step 4: Run the full suite to verify it passes**
 
-Run: `python -m pytest -q`
+Run: `uv run pytest -q`
 Expected: PASS (all tests green across every file)
 
 - [ ] **Step 5: Commit**
@@ -1007,7 +1023,7 @@ def test_stats_reports_counts(tmp_path, capsys):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest tests/test_cli.py -q`
+Run: `uv run pytest tests/test_cli.py -q`
 Expected: FAIL — `ModuleNotFoundError: No module named 'memory_engine.cli'`
 
 - [ ] **Step 3: Write minimal implementation**
@@ -1078,16 +1094,16 @@ if __name__ == "__main__":
 
 - [ ] **Step 4: Run the full suite to verify it passes**
 
-Run: `python -m pytest -q`
+Run: `uv run pytest -q`
 Expected: PASS (all tests green)
 
 - [ ] **Step 5: Manual smoke test**
 
 Run:
 ```bash
-python -m memory_engine.cli --db ./smoke.db add --scope global --type fact --name "Iowa" --description "where" --body "The user lives in Iowa"
-python -m memory_engine.cli --db ./smoke.db search --scopes global --query "iowa"
-python -m memory_engine.cli --db ./smoke.db stats
+uv run python -m memory_engine.cli --db ./smoke.db add --scope global --type fact --name "Iowa" --description "where" --body "The user lives in Iowa"
+uv run python -m memory_engine.cli --db ./smoke.db search --scopes global --query "iowa"
+uv run python -m memory_engine.cli --db ./smoke.db stats
 ```
 Expected: add prints `Inserted 1`; search prints the Iowa line; stats prints `{"total": 1, "active": 1, "archived": 0}`. Then delete `smoke.db`.
 
@@ -1102,7 +1118,7 @@ git commit -m "feat: CLI driver (add/list/search/stats/sweep)"
 
 ## Phase 1 Done — Definition of Done
 
-- `python -m pytest -q` is fully green.
+- `uv run pytest -q` is fully green.
 - CLI smoke test round-trips an add → search → stats.
 - No Claude Code wiring exists yet (correct — that's Phase 2).
 - `captureHits`/`recallHits`/`lastUsedAt`/`status` all mutate through code, never instructions.
