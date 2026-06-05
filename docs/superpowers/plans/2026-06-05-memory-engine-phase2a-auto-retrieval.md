@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Surface relevant cold-store memories into each turn automatically: a `UserPromptSubmit` hook that queries the DB by the user's prompt (bm25-gated, scope-merged global + current project) and injects the strong matches as context — fail-open so it can never block a turn.
+**Goal:** Surface relevant cold-store memories into each turn automatically: a `UserPromptSubmit` hook that queries the DB by the user's prompt (top-k bm25-ranked, scope-merged global + current project) and injects the matches as context — fail-open so it can never block a turn.
 
-**Architecture:** Build on the Phase 1 engine (merged to `main`). Add DB-path self-resolution (`~/.claude/memory/memory.db`), scope resolution from the hook's `cwd` (git repo root, cwd fallback), a bm25-gated `retrieve` policy on the repository, a `<memory>` block formatter, and an `inject` CLI subcommand that speaks the Claude Code `UserPromptSubmit` hook contract. The engine is distributed as a global `uv` tool (`uv tool install --editable`), so the hook command `memory-engine inject` runs in any project. No Claude Code wiring is hardcoded in the engine — the hook config lives in `settings.json`.
+**Architecture:** Build on the Phase 1 engine (merged to `main`). Add DB-path self-resolution (`~/.claude/memory/memory.db`), scope resolution from the hook's `cwd` (git repo root, cwd fallback), a top-k bm25 `retrieve` policy on the repository (reusing Phase 1's tested `search`), a `<memory>` block formatter, and an `inject` CLI subcommand that speaks the Claude Code `UserPromptSubmit` hook contract. The engine is distributed as a global `uv` tool (`uv tool install --editable`), so the hook command `memory-engine inject` runs in any project. No Claude Code wiring is hardcoded in the engine — the hook config lives in `settings.json`.
 
 **Tech Stack:** Python 3 (stdlib `sqlite3`, `subprocess`, `json`, `pathlib`); `pytest`; `uv`. Windows-clean (`uv run pytest`, `py`).
 
@@ -193,16 +193,22 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 ---
 
-### Task 3: Repository `retrieve` (bm25-gated, scope-merged, revive)
+### Task 3: Repository `retrieve` (top-k bm25, scope-merged, revive)
 
 **Files:** Modify `src/memory_engine/repository.py`; Test `tests/test_repository_retrieve.py`.
+
+**Design note:** an absolute bm25 cutoff was rejected during plan red-team — bm25
+magnitude scales with corpus size (IDF), so no fixed threshold is stable (measured: a
+1-token match scores `0` on a 1-row fixture but `-3.35` on a 51-row corpus). Phase 2a
+returns the best-k matches; FTS `MATCH` already requires token overlap and `k` caps the
+count. Calibrated relevance gating is deferred to a Phase 4 tuning pass against the real
+corpus. This task therefore reuses Phase 1's already-tested `search` — no score plumbing.
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
 # tests/test_repository_retrieve.py
-import dataclasses
-from memory_engine.repository import MemoryRepository, RAG_INJECT_THRESHOLD
+from memory_engine.repository import MemoryRepository
 from memory_engine.parser import Parsed
 
 
@@ -214,20 +220,21 @@ def test_retrieve_merges_scopes_and_excludes_others(conn, clock):
     repo = MemoryRepository(conn, clock=clock)
     g = _add(repo, "global", "alpha bravo charlie delta echo")
     p = _add(repo, "repoA", "alpha bravo charlie delta echo")
-    _add(repo, "repoB", "alpha bravo charlie delta echo")
+    _add(repo, "repoB", "alpha bravo charlie delta echo")  # competing row, must be excluded
     out = repo.retrieve("alpha bravo charlie delta echo", scopes=["global", "repoA"], k=10)
     ids = {m.id for m in out}
-    assert ids == {g.id, p.id}  # repoB excluded
+    assert ids == {g.id, p.id}  # repoB excluded by scope
 
 
-def test_retrieve_gates_weak_matches(conn, clock):
+def test_retrieve_returns_best_k_ordered(conn, clock):
     repo = MemoryRepository(conn, clock=clock)
-    _add(repo, "global", "alpha bravo charlie delta echo foxtrot golf")
-    # A query sharing only one common token against a long doc scores weakly.
-    weak = repo.retrieve("alpha zulu yankee xray whiskey victor", scopes=["global"], k=10)
-    strong = repo.retrieve("alpha bravo charlie delta echo foxtrot golf", scopes=["global"], k=10)
-    assert weak == []                # below threshold → dropped
-    assert len(strong) == 1          # strong match kept
+    # Three matching rows; ask for top 2 — retrieve caps at k and orders by bm25.
+    _add(repo, "global", "alpha bravo charlie delta echo foxtrot")  # fullest overlap
+    _add(repo, "global", "alpha bravo charlie")
+    _add(repo, "global", "alpha")
+    out = repo.retrieve("alpha bravo charlie delta echo foxtrot", scopes=["global"], k=2)
+    assert len(out) == 2                 # capped at k
+    assert "foxtrot" in out[0].body      # best (all-6-token) match ranks first
 
 
 def test_retrieve_bumps_recall_on_served(conn, clock):
@@ -239,6 +246,16 @@ def test_retrieve_bumps_recall_on_served(conn, clock):
     row = conn.execute("SELECT recallHits, lastUsedAt FROM memories WHERE id=?", (m.id,)).fetchone()
     assert row["recallHits"] == 1
     assert row["lastUsedAt"] == clock.now
+
+
+def test_retrieve_active_takes_precedence_over_archived(conn, clock):
+    repo = MemoryRepository(conn, clock=clock)
+    active = _add(repo, "global", "alpha bravo charlie delta echo")
+    archived = _add(repo, "global", "alpha bravo charlie delta echo foxtrot golf")
+    conn.execute("UPDATE memories SET status='archived' WHERE id=?", (archived.id,))
+    conn.commit()
+    out = repo.retrieve("alpha bravo charlie delta echo", scopes=["global"], k=10)
+    assert {m.id for m in out} == {active.id}  # active non-empty → archived never consulted
 
 
 def test_retrieve_falls_back_to_archived_and_revives(conn, clock):
@@ -263,55 +280,35 @@ def test_retrieve_empty_query_returns_empty(conn, clock):
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/test_repository_retrieve.py -q`
-Expected: FAIL — `ImportError: cannot import name 'RAG_INJECT_THRESHOLD'` / no `retrieve`.
+Expected: FAIL — `AttributeError: 'MemoryRepository' object has no attribute 'retrieve'`.
 
 - [ ] **Step 3: Modify `src/memory_engine/repository.py`**
 
-(a) Add these constants next to the existing `ARCHIVE_AFTER_DAYS` / `_DAY_MS`:
+(a) Add this constant next to the existing `ARCHIVE_AFTER_DAYS` / `_DAY_MS`:
 
 ```python
 RETRIEVE_K = 5
-RAG_INJECT_THRESHOLD = -1.0  # bm25 is negative; keep matches stronger (more negative)
 ```
 
 (b) Add `import dataclasses` to the top of the file (with the other imports).
 
-(c) Add these two methods to `MemoryRepository` (after `search`):
+(c) Add this method to `MemoryRepository` (after `search`). It reuses the existing
+`search(text, scopes, limit, status)` from Phase 1 — no new SQL:
 
 ```python
-    def _search_scored(self, text: str, scopes: list[str], status: str,
-                       k: int) -> list[tuple[Memory, float]]:
-        """Scope-filtered FTS search returning (Memory, bm25 score) pairs, best
-        first. Empty when text yields no usable query or scopes is empty."""
-        fuzzy = from_user_text(text)
-        if fuzzy is None or not scopes:
-            return []
-        placeholders = ",".join("?" for _ in scopes)
-        sql = (
-            "SELECT m.*, bm25(memories_fts) AS score "
-            "FROM memories m JOIN memories_fts f ON f.rowid=m.id "
-            f"WHERE memories_fts MATCH ? AND m.status=? AND m.scope IN ({placeholders}) "
-            "ORDER BY score ASC LIMIT ?"
-        )
-        try:
-            rows = self._conn.execute(sql, (fuzzy, status, *scopes, k)).fetchall()
-        except sqlite3.OperationalError:
-            return []
-        return [(self._to_memory(r), r["score"]) for r in rows]
-
     def retrieve(self, text: str, scopes: list[str], k: int = RETRIEVE_K) -> list[Memory]:
-        """Auto-retrieval: bm25-gated active search across the given scopes; if the
-        active set is empty (or all below threshold) fall back to archived (and revive
-        hits). Bumps recallHits on everything served. Returns Memory rows best-first,
-        reflecting the post-revive state."""
-        active = [m for (m, s) in self._search_scored(text, scopes, STATUS_ACTIVE, k)
-                  if s < RAG_INJECT_THRESHOLD]
+        """Auto-retrieval: the best-k bm25 matches across the given scopes, active
+        first. If the active set is empty, fall back to archived and revive the hits.
+        Bumps recallHits on everything served, best-first.
+
+        No absolute score cutoff: bm25 magnitude is corpus-dependent (rejected in plan
+        red-team), so calibrated relevance gating is deferred to a Phase 4 tuning pass.
+        FTS MATCH already requires token overlap and k caps the count."""
+        active = self.search(text, scopes, k, STATUS_ACTIVE)
         if active:
             self.bump_recall([m.id for m in active])
             return active
-
-        archived = [m for (m, s) in self._search_scored(text, scopes, STATUS_ARCHIVED, k)
-                    if s < RAG_INJECT_THRESHOLD]
+        archived = self.search(text, scopes, k, STATUS_ARCHIVED)
         if not archived:
             return []
         now = self._clock()
@@ -326,7 +323,7 @@ Do NOT change `capture_or_merge`, `_find_fuzzy_candidate`, `search`, `bump_recal
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest tests/test_repository_retrieve.py -q`
-Expected: PASS (5 passed). Then `uv run pytest -q` — full suite still green.
+Expected: PASS (6 passed). Then `uv run pytest -q` — full suite still green.
 
 - [ ] **Step 5: Commit**
 
@@ -667,8 +664,9 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
   0** (fail-open verified for malformed stdin, empty prompt, and no-match).
 - Scope resolution distinguishes repos (git root) with cwd fallback; retrieval merges
   `global` + current project only.
-- Retrieval gates weak matches by `RAG_INJECT_THRESHOLD`, falls back to archived with
-  revive, and bumps `recallHits`.
+- Retrieval returns the best-k bm25 matches (no absolute cutoff), falls back to
+  archived with revive, and bumps `recallHits`. (Calibrated relevance gating deferred
+  to a Phase 4 tuning pass against the real corpus.)
 - Live end-to-end injection confirmed by the human after restart (the pineapple test).
 
 ## What Phase 2b / later add (not in this plan)
@@ -678,4 +676,6 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
   registration.
 - **Phase 3:** capture wiring (`memory_add` tool, session-end sweep), management tools.
 - **Phase 4:** `SessionStart` archival-sweep + backup-on-boot-if-stale, kill switch,
-  corruption recovery / deeper fail-open hardening.
+  corruption recovery / deeper fail-open hardening, and **calibrated relevance gating**
+  for retrieval (measured against the real `~/.claude/memory` corpus, replacing the
+  Phase 2a top-k-only behavior).
