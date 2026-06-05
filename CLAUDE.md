@@ -6,8 +6,10 @@ project scope. **Decoupled** from Claude Code's `MEMORY.md` — purely additive.
 
 - Spec: `docs/superpowers/specs/2026-06-05-claude-code-memory-engine-design.md`
 - Plan (Phase 1): `docs/superpowers/plans/2026-06-05-memory-engine-phase1-core-db.md`
-- Status: **Phase 1 (Core + DB) complete** on `main`. Phases 2–4 (retrieval/hooks,
-  capture wiring, backups/kill-switch) remain.
+- Status: **Phase 1 complete** on `main`; **Phase 2a (auto-retrieval + UserPromptSubmit
+  hook) implemented** on `phase-2a-auto-retrieval`. Remaining: Phase 2b (`recall_memory`
+  MCP server), Phase 3 (capture wiring), Phase 4 (SessionStart archival/backup, kill
+  switch, calibrated relevance gating).
 
 ## Tooling (Windows)
 
@@ -68,5 +70,22 @@ project scope. **Decoupled** from Claude Code's `MEMORY.md` — purely additive.
 - `db.py` — `SCHEMA_SQL`, `connect`, `init_db` (FTS5 external-content + triggers).
 - `repository.py` — `MemoryRepository`: `capture_or_merge` (2-stage dedup), `search`,
   `bump_recall`, `run_archival_sweep` (clock injected for tests).
-- `cli.py` — manual driver (`add`/`list`/`search`/`stats`/`sweep`). No Claude Code
-  wiring (that's Phase 2).
+- `cli.py` — driver + hook entry: `add`/`list`/`search`/`stats`/`sweep` plus `inject`
+  (the UserPromptSubmit hook body, fail-open). `--db` defaults to the self-resolved path.
+- `paths.py` — `default_db_path()` → `~/.claude/memory/memory.db`.
+- `scope.py` — `resolve_scope_key`/`scopes_for` (git repo root, cwd fallback).
+- `formatting.py` — `format_memory_block` → the injected `<memory>` block.
+
+## Claude Code wiring (Phase 2a)
+
+- The engine is installed globally as a `uv` tool (`uv tool install --editable .`),
+  exposing `memory-engine` on PATH so the hook runs in any project.
+- Auto-retrieval is wired via a **`UserPromptSubmit` hook** in `~/.claude/settings.json`
+  (outside this repo) that runs `memory-engine inject` — the global uv-tool shim,
+  resolved on PATH.
+  On each prompt it injects scope-merged top-k memories as
+  `hookSpecificOutput.additionalContext`, and is fail-open (always exit 0) so it can
+  never block a turn.
+- Hooks load at session start — config changes require a restart/resume to take effect.
+- Kill switch (interim): remove the `UserPromptSubmit` block from
+  `~/.claude/settings.json`. A flag-based switch is Phase 4.
