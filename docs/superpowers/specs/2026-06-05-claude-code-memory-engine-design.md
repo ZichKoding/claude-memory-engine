@@ -18,7 +18,7 @@ engine is purely additive. If it misbehaves, it can be turned off with one flag 
 the session reverts to today's behavior with zero data loss.
 
 This design ports the parts of a proven on-device memory design we value:
-`captureOrMerge` two-stage dedup, `captureHits`/`recallHits`/`lastUsedAt` counters,
+`captureOrMerge` exact-key dedup, `captureHits`/`recallHits`/`lastUsedAt` counters,
 FTS5/bm25 retrieval, and the active/archived lifecycle — adapted for Claude Code and
 extended with a two-level (global + project) scope axis the reference design lacks.
 
@@ -149,9 +149,10 @@ Four touchpoints:
   then decides: skip (already covered), `edit` by id (fact changed/wrong), or `add` a
   new memory. Scope: about-user/cross-project → `global`; project-specific → `--cwd`
   resolves the `<repo-key>`. Type is one of the allowlist facets.
-- `captureOrMerge` (used by `add`): (1) hard-key match → bump `captureHits`; (2)
-  fuzzy-FTS match constrained to **same scope + type**, active then archived (archived
-  match auto-revives); (3) else insert new row.
+- `captureOrMerge` (used by `add`): (1) exact hard-key match (scope+type+normalized
+  body) → bump `captureHits`; (2) else insert a new row. **No code-level fuzzy dedup** —
+  it false-merged unrelated rows that shared a common word (removed); paraphrase/semantic
+  dedup is the agent's recall-then-decide job.
 - **Session-end sweep:** deferred — an optional Phase 4 fallback (a `SessionEnd` hook
   doing one transcript extraction pass) only if inline capture proves leaky; skipped to
   avoid a per-session full-transcript model-call cost.
@@ -195,8 +196,8 @@ rare safety valve, not the primary path.
 ## Testing
 
 - **Unit (pure logic):** `normalizeBody`/`normalizedKey`, `FtsQuery` sanitizer,
-  candidate `parse`, `captureOrMerge` outcomes (insert / merge-by-key /
-  merge-by-fuzzy), **scope isolation** (project capture never merges into global),
+  candidate `parse`, `captureOrMerge` outcomes (insert / merge-by-key),
+  **scope isolation** (project capture never merges into global),
   archival→revive, counter bumps. In-memory SQLite for DAO tests; injected clock for
   time-based logic (injected-clock pattern).
 - **Integration:** hook scripts invoked with sample Claude Code payloads.
