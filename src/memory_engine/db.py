@@ -7,6 +7,8 @@ import shutil
 import sqlite3
 from pathlib import Path
 
+from memory_engine.backup import _stamp_of  # single source of truth for the memory-<ms>.db stamp
+
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS memories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -89,9 +91,11 @@ def recover_if_corrupt(path: str, backups_dir: str) -> str:
         n += 1
     os.replace(path, f"{path}.corrupt-{n}")
     # restore from the newest HEALTHY backup (a corrupt newest snapshot must not win),
-    # and re-verify the restored copy; else fall through to recreate.
+    # and re-verify the restored copy; else fall through to recreate. Sort by the numeric
+    # epoch-ms stamp (not lexicographic) to stay consistent with backup.py's ordering.
     if os.path.isdir(backups_dir):
-        for b in sorted(Path(backups_dir).glob("memory-*.db"), reverse=True):
+        for b in sorted(Path(backups_dir).glob("memory-*.db"),
+                        key=lambda p: (_stamp_of(p) or 0), reverse=True):
             if _is_healthy(str(b)):
                 shutil.copyfile(str(b), path)
                 if _is_healthy(path):

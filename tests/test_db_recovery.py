@@ -39,6 +39,32 @@ def test_restore_skips_corrupt_newest_backup(tmp_path):
     assert connect(db).execute("SELECT COUNT(*) FROM memories").fetchone()[0] == 1
 
 
+def test_restore_picks_numerically_newest_healthy_backup(tmp_path):
+    # Two HEALTHY backups with UNEQUAL-width stamps and different row counts. The numeric
+    # newest (1000) is the freshest snapshot and must win. Lexicographically, "memory-999.db"
+    # sorts AFTER "memory-1000.db", so a string sort would wrongly restore the older 999 one
+    # — this test only passes when recover_if_corrupt sorts by the numeric epoch-ms stamp.
+    db = str(tmp_path / "m.db"); _good_db(db)
+    bdir = tmp_path / "backups"; bdir.mkdir()
+
+    # older snapshot (stamp 999): TWO rows
+    older = str(bdir / "memory-999.db"); _good_db(older)
+    c = sqlite3.connect(older)
+    c.execute("INSERT INTO memories(scope,type,name,description,body,normalizedKey,"
+              "captureHits,recallHits,lastUsedAt,status,createdAt,updatedAt,source) "
+              "VALUES('global','fact','n2','d','b2','k2',1,0,1,'active',1,1,'manual')")
+    c.commit(); c.close()
+    assert sqlite3.connect(older).execute("SELECT COUNT(*) FROM memories").fetchone()[0] == 2
+
+    # newer snapshot (stamp 1000): ONE row (the canonical freshest state)
+    con = sqlite3.connect(db); con.execute("VACUUM INTO ?", (str(bdir / "memory-1000.db"),)); con.close()
+
+    Path(db).write_bytes(b"garbage")
+    assert recover_if_corrupt(db, str(bdir)) == "restored"
+    # must restore the numerically-newest (1000 → 1 row), NOT the lexicographic-newest (999 → 2 rows)
+    assert connect(db).execute("SELECT COUNT(*) FROM memories").fetchone()[0] == 1
+
+
 def test_corrupt_db_no_backup_recreates_empty(tmp_path):
     db = str(tmp_path / "m.db"); _good_db(db)
     Path(db).write_bytes(b"garbage")
