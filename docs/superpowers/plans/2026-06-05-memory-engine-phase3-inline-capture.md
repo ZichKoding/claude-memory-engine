@@ -82,14 +82,17 @@ def test_edit_missing_id_returns_not_found(conn, clock):
 
 def test_edit_conflict_when_key_would_collide(conn, clock):
     repo = MemoryRepository(conn, clock=clock)
-    a = _add(repo, "global", "alpha fact body", type_="fact")
-    b = _add(repo, "global", "beta fact body", type_="fact")
+    # Token-DISJOINT bodies so capture-time fuzzy dedup keeps them as TWO rows.
+    # (Sharing any >=3-char token would merge them at add time and void this test —
+    # the recurring fixture trap: same scope+type multi-row fixtures must be token-disjoint.)
+    a = _add(repo, "global", "alpha", type_="fact")
+    b = _add(repo, "global", "bravo", type_="fact")
+    assert conn.execute("SELECT COUNT(*) c FROM memories").fetchone()["c"] == 2  # both persist
     # Editing b's body to equal a's (same scope+type) would duplicate a's normalizedKey.
-    result = repo.edit(b.id, body="alpha fact body")
+    result = repo.edit(b.id, body="alpha")
     assert result == "conflict"
-    # b is unchanged
     row = conn.execute("SELECT body FROM memories WHERE id=?", (b.id,)).fetchone()
-    assert row["body"] == "beta fact body"
+    assert row["body"] == "bravo"  # unchanged
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
