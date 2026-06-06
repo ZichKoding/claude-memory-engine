@@ -31,3 +31,15 @@ def test_different_scope_does_not_merge(conn, clock):
     b = repo.capture_or_merge(p, scope="repoA")
     assert a.id != b.id
     assert conn.execute("SELECT COUNT(*) c FROM memories").fetchone()["c"] == 2
+
+
+def test_unrelated_same_type_bodies_do_not_merge(conn, clock):
+    repo = MemoryRepository(conn, clock=clock)
+    # Two UNRELATED preferences that share only the ubiquitous word "user" must NOT
+    # merge — fuzzy dedup used to false-merge them, silently dropping the second.
+    a = repo.capture_or_merge(Parsed("preference", "Langs", "d", "the user likes python and rust"), scope="global")
+    b = repo.capture_or_merge(Parsed("preference", "Arch", "d", "the user favors lean decoupled architecture"), scope="global")
+    assert isinstance(a, Inserted)
+    assert isinstance(b, Inserted)
+    assert a.id != b.id
+    assert conn.execute("SELECT COUNT(*) c FROM memories").fetchone()["c"] == 2
