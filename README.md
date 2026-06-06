@@ -102,3 +102,7 @@ The hook and skills can be disabled at any time (see INSTALL.md → off-switch t
 ## Tech
 
 Python (stdlib `sqlite3` + FTS5) · `uv` · pytest. Cross-platform; developed on Windows.
+
+## License
+
+[MIT](LICENSE) © ZichKoding
