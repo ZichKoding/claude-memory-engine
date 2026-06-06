@@ -6,7 +6,7 @@ from typing import Callable
 
 from memory_engine.fts_query import from_user_text
 from memory_engine.models import (
-    STATUS_ACTIVE, STATUS_ARCHIVED, Inserted, Memory, MergedByFuzzy, MergedByKey, Outcome,
+    STATUS_ACTIVE, STATUS_ARCHIVED, Inserted, Memory, MergedByKey, Outcome,
 )
 from memory_engine.normalizer import normalized_key
 from memory_engine.parser import Parsed
@@ -22,6 +22,9 @@ class MemoryRepository:
         self._clock = clock
 
     def capture_or_merge(self, parsed: Parsed, scope: str) -> Outcome:
+        """Dedup is exact hard-key only (no fuzzy). Stage 1: hard-key match on
+        normalizedKey (scope+type+normalised body SHA-1). Stage 2: insert a new row.
+        Semantic/paraphrase dedup is the agent's recall-then-decide responsibility."""
         now = self._clock()
         key = normalized_key(scope, parsed.type, parsed.body)
 
@@ -33,20 +36,7 @@ class MemoryRepository:
             self._bump_capture_hit(row["id"], now)
             return MergedByKey(row["id"])
 
-        # Stage 2: fuzzy FTS match, same scope+type. Active first, then archived
-        # (an archived match is revived by _bump_capture_hit's status='active').
-        fuzzy = from_user_text(parsed.body)
-        if fuzzy is not None:
-            hit = self._find_fuzzy_candidate(fuzzy, scope, parsed.type, STATUS_ACTIVE)
-            if hit is not None:
-                self._bump_capture_hit(hit, now)
-                return MergedByFuzzy(hit, from_archived=False)
-            hit = self._find_fuzzy_candidate(fuzzy, scope, parsed.type, STATUS_ARCHIVED)
-            if hit is not None:
-                self._bump_capture_hit(hit, now)
-                return MergedByFuzzy(hit, from_archived=True)
-
-        # Stage 3: insert new row.
+        # Stage 2: insert new row.
         cur = self._conn.execute(
             "INSERT INTO memories(scope,type,name,description,body,normalizedKey,"
             "captureHits,recallHits,lastUsedAt,status,createdAt,updatedAt,source) "
@@ -92,23 +82,6 @@ class MemoryRepository:
             (now, now, id_),
         )
         self._conn.commit()
-
-    def _find_fuzzy_candidate(self, fuzzy: str, scope: str, type_: str, status: str):
-        """First same-scope+type FTS hit at the given status, or None. The type
-        filter is in SQL (not a post-LIMIT-1 Python check) so the best bm25 row of
-        the CORRECT type is returned even when a different-type row outranks it."""
-        try:
-            row = self._conn.execute(
-                "SELECT m.id FROM memories m JOIN memories_fts f ON f.rowid=m.id "
-                "WHERE memories_fts MATCH ? AND m.scope=? AND m.status=? AND m.type=? "
-                "ORDER BY bm25(memories_fts) ASC LIMIT 1",
-                (fuzzy, scope, status, type_),
-            ).fetchone()
-        except sqlite3.OperationalError:
-            return None  # malformed MATCH — treat as no candidate
-        if row is None:
-            return None
-        return row["id"]
 
     def search(self, text: str, scopes: list[str], limit: int,
                status: str = STATUS_ACTIVE) -> list[Memory]:

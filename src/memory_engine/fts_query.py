@@ -1,6 +1,7 @@
 # src/memory_engine/fts_query.py
-"""Turn free-form text into a safe FTS5 MATCH expression. Shared by capture-time
-fuzzy dedup (Phase 1) and retrieval (Phase 2) so both normalize identically."""
+"""Turn free-form text into a safe FTS5 MATCH expression. Used by retrieval/search
+(auto-inject + recall) so queries normalize identically. Capture dedup is exact
+(hard-key), not fuzzy — it does not use this."""
 import re
 
 _NON_ALNUM_WS = re.compile(r"[^a-z0-9\s]")

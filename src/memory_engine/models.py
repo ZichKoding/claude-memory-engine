@@ -34,10 +34,4 @@ class MergedByKey:
     id: int
 
 
-@dataclass(frozen=True)
-class MergedByFuzzy:
-    id: int
-    from_archived: bool = False
-
-
-Outcome = Inserted | MergedByKey | MergedByFuzzy
+Outcome = Inserted | MergedByKey

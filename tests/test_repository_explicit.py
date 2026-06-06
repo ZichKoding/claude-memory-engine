@@ -43,7 +43,7 @@ def test_explicit_respects_scope(conn, clock):
 
 def test_explicit_caps_at_k(conn, clock):
     repo = MemoryRepository(conn, clock=clock)
-    # Distinct types so all three survive scope+type fuzzy dedup.
+    # Distinct bodies → three separate rows under exact dedup (types here are incidental).
     _add(repo, "global", "alpha bravo charlie delta echo foxtrot", type_="fact")
     _add(repo, "global", "alpha bravo charlie", type_="preference")
     _add(repo, "global", "alpha", type_="person")

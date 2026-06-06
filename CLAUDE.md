@@ -4,13 +4,13 @@ A local memory engine for Claude Code: a standalone SQLite layer (FTS5 + bm25
 + counters + lifecycle) that surfaces relevant memories per turn at global and
 project scope. **Decoupled** from Claude Code's `MEMORY.md` — purely additive.
 
+- Overview / usage: `README.md`
 - Spec: `docs/superpowers/specs/2026-06-05-claude-code-memory-engine-design.md`
 - Plan (Phase 1): `docs/superpowers/plans/2026-06-05-memory-engine-phase1-core-db.md`
 - Claude Code setup (skills, hook, standing instruction): `claude-integration/INSTALL.md`
-- Status: **Phases 1, 2a (auto-retrieval hook), 2b (explicit recall CLI+skill) merged**
-  on `main`; **Phase 3 (inline capture) implemented** on `phase-3-inline-capture`.
-  Remaining: Phase 4 (SessionStart archival/backup, kill switch, calibrated relevance
-  gating, counter-snapshot hardening; optional session-end capture sweep fallback).
+- Status: **Phases 1–3 + the Claude Code integration bundle merged** on `main`; the
+  exact-only dedup fix is in **PR #4**. Remaining: Phase 4 (SessionStart archival/backup,
+  kill switch, calibrated relevance gating; optional near-dup `consolidate` pass).
 
 ## Tooling (Windows)
 
@@ -32,10 +32,11 @@ project scope. **Decoupled** from Claude Code's `MEMORY.md` — purely additive.
 - **Two-level scope:** every row has a `scope` — `'global'` or a project key (the git
   repo root, via `git rev-parse --show-toplevel`, cwd fallback). Retrieval merges
   `global` + current project only.
-- **Dedup is scope+type aware.** The `normalizedKey` UNIQUE key folds in scope and
-  type; fuzzy-FTS dedup is constrained to the same scope AND type *in SQL*. A project
-  capture must never merge into a global row; different-type same-text captures stay
-  separate.
+- **Dedup is exact + scope+type aware.** The `normalizedKey` UNIQUE key folds in
+  scope + type + normalized body; capture merges ONLY on an exact hard-key match.
+  There is **no code-level fuzzy/semantic dedup** — it false-merged unrelated rows that
+  shared a common word, so it was removed; paraphrase/semantic dedup is the agent's
+  recall-then-decide job (the capture skill). A project capture never merges into global.
 - **Counters mutate only through code** (`captureHits`/`recallHits`/`lastUsedAt`/
   `status`) — never via prompt instructions. That determinism is the whole point.
 
@@ -47,11 +48,11 @@ project scope. **Decoupled** from Claude Code's `MEMORY.md` — purely additive.
   the table has only one row — it would pass even with the filter deleted. Populate
   the adversarial case. (This is a Phase 1 lesson: a one-row fixture hid a real
   dedup bug that only the final holistic review caught.)
-- **Same scope+type multi-row fixtures MUST use token-disjoint bodies.** Capture-time
-  fuzzy dedup merges same-scope+type rows that share any ≥3-char token, silently
-  collapsing the fixture to one row (this bit Phase 2a twice and Phase 3 once). Use
-  disjoint tokens (e.g. `"alpha"`/`"bravo"`), or distinct types/scopes, so the rows
-  actually persist.
+- **(Resolved) The fuzzy-dedup fixture trap.** Earlier, capture-time fuzzy dedup merged
+  same-scope+type rows sharing any ≥3-char token, silently collapsing fixtures (bit
+  Phase 2a ×2, Phase 3 ×1). That fuzzy dedup was **removed** (it false-merged real data),
+  so dedup is now exact-only and the trap no longer applies here — the general rule above
+  still does.
 - **Before implementing a plan with non-trivial logic, run the `plan-redteam` agent**
   (user-level) over it. Spec-compliance review cannot catch a wrong spec.
 - Use the in-memory SQLite `conn` fixture and the injected `clock` fixture
@@ -72,9 +73,9 @@ project scope. **Decoupled** from Claude Code's `MEMORY.md` — purely additive.
 - `normalizer.py` — `normalize_body`, `normalized_key` (scope+type+body → sha1).
 - `fts_query.py` — `from_user_text` → FTS5 MATCH expression (or None).
 - `parser.py` — `Parsed`, `parse_candidates` (strict pipe-delimited extraction).
-- `models.py` — `Memory` row, `Inserted`/`MergedByKey`/`MergedByFuzzy` outcomes.
+- `models.py` — `Memory` row, `Inserted`/`MergedByKey` outcomes.
 - `db.py` — `SCHEMA_SQL`, `connect`, `init_db` (FTS5 external-content + triggers).
-- `repository.py` — `MemoryRepository`: `capture_or_merge` (2-stage dedup), `search`,
+- `repository.py` — `MemoryRepository`: `capture_or_merge` (exact hard-key dedup), `search`,
   `retrieve` (auto top-k), `retrieve_explicit` (active+archived), `edit`, `bump_recall`,
   `run_archival_sweep` (clock injected for tests).
 - `cli.py` — driver + hook entry: `add` (`--cwd` scope), `edit`, `list`/`search`/`stats`/
