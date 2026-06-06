@@ -90,8 +90,10 @@ plans are in **[`docs/superpowers/plans/`](docs/superpowers/plans/)**.
 - ✅ **Phase 2a** — auto-retrieval `UserPromptSubmit` hook (top-k, scope-merged, fail-open)
 - ✅ **Phase 2b** — explicit `recall` (CLI + skill; active + archived)
 - ✅ **Phase 3** — inline proactive capture (skill + standing instruction) + `edit`
-- ⏭️ **Phase 4** — `SessionStart` archival/backup, kill switch, calibrated relevance gating,
-  optional near-duplicate `consolidate` pass
+- ✅ **Phase 4a** — ops safety: master kill switch, `SessionStart` archival/backup
+  (stale-gated `VACUUM INTO`, 7 retained), boot-time corruption recovery (quarantine +
+  restore-from-healthy / recreate) — all fail-open
+- ⏭️ **Phase 4b** — calibrated relevance gating, optional near-duplicate `consolidate` pass
 - 🔭 **Later** — associative (HDC) recall layer (research)
 
 ## Privacy
