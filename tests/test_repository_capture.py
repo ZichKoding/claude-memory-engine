@@ -43,3 +43,32 @@ def test_unrelated_same_type_bodies_do_not_merge(conn, clock):
     assert isinstance(b, Inserted)
     assert a.id != b.id
     assert conn.execute("SELECT COUNT(*) c FROM memories").fetchone()["c"] == 2
+
+
+def test_exact_recapture_revives_archived(conn, clock):
+    # Exact hard-key re-capture is now the SOLE capture-time revival path (the fuzzy
+    # path was removed) — re-stating an identical fact must merge + revive, not insert.
+    repo = MemoryRepository(conn, clock=clock)
+    m = repo.capture_or_merge(Parsed("fact", "Home", "d", "the user lives in iowa"), scope="global")
+    conn.execute("UPDATE memories SET status='archived' WHERE id=?", (m.id,))
+    conn.commit()
+    clock.now += 5
+    out = repo.capture_or_merge(Parsed("fact", "Home", "d", "the user lives in iowa"), scope="global")
+    assert isinstance(out, MergedByKey)
+    assert out.id == m.id
+    row = conn.execute("SELECT status, captureHits FROM memories WHERE id=?", (m.id,)).fetchone()
+    assert row["status"] == "active"   # revived
+    assert row["captureHits"] == 2     # bumped
+    assert conn.execute("SELECT COUNT(*) c FROM memories").fetchone()["c"] == 1
+
+
+def test_same_body_different_type_does_not_merge(conn, clock):
+    # Type is folded into the hard key, so same scope+body but different type → 2 rows
+    # (repository-level coverage of the type dimension, complementing the unit test).
+    repo = MemoryRepository(conn, clock=clock)
+    a = repo.capture_or_merge(Parsed("fact", "X", "d", "the user lives in iowa"), scope="global")
+    b = repo.capture_or_merge(Parsed("preference", "X", "d", "the user lives in iowa"), scope="global")
+    assert isinstance(a, Inserted)
+    assert isinstance(b, Inserted)
+    assert a.id != b.id
+    assert conn.execute("SELECT COUNT(*) c FROM memories").fetchone()["c"] == 2

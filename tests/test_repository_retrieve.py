@@ -19,9 +19,9 @@ def test_retrieve_merges_scopes_and_excludes_others(conn, clock):
 
 def test_retrieve_returns_best_k_ordered(conn, clock):
     repo = MemoryRepository(conn, clock=clock)
-    # Three matching rows with DISTINCT types so capture-time fuzzy dedup (which is
-    # scope+type-constrained) keeps them as separate rows. Retrieval filters on
-    # scope+status only (not type), so all three are still searched and bm25-ranked.
+    # Three matching rows with distinct bodies (so they're separate rows under exact
+    # dedup). Retrieval filters on scope+status only, so all three are searched and
+    # bm25-ranked; k caps the result.
     _add(repo, "global", "alpha bravo charlie delta echo foxtrot", type_="fact")  # fullest overlap
     _add(repo, "global", "alpha bravo charlie", type_="preference")
     _add(repo, "global", "alpha", type_="person")

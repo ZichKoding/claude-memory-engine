@@ -24,7 +24,7 @@ surface *only when relevant*, so they help without eating context. It's additive
 | Capability | How | Surface |
 |---|---|---|
 | **Auto-retrieval** | A `UserPromptSubmit` hook fuzzy-searches (FTS5/bm25) your prompt and injects the top matches as a `<memory>` block. **Fail-open** — never blocks a turn. | per turn, automatic |
-| **Explicit recall** | The agent runs `memory-engine recall` (active **+** archived, both scopes) when it needs to dig deeper. | `recall-memory` skill |
+| **Explicit recall** | The agent runs `memory-engine recall` (active **+** archived; global + the current project when given `--cwd`) when it needs to dig deeper. | `recall-memory` skill |
 | **Proactive capture** | The agent saves durable, directly-stated facts on its own judgment — recall first, then add/skip/edit. | `capture-memory` skill + a standing instruction |
 
 Plus: **two-level scope** (a `global` store + one per git project, merged at read time),
