@@ -49,7 +49,7 @@ extended with a two-level (global + project) scope axis the reference design lac
 | 2 | Coupling to MEMORY.md | **Decoupled.** Two independent systems; MEMORY.md unchanged |
 | 3 | DB physical location | Private global `~/.claude` path-keyed dir. **Never in any repo / git history** |
 | 4 | Source of truth | The DB is system-of-record for its own data. MEMORY.md is system-of-record for its own data. No derivation between them |
-| 5 | Capture model | Hybrid: inline tool (Claude judgment) + one session-end sweep pass; both through `captureOrMerge` |
+| 5 | Capture model | Inline, agent-driven (conservative, proactive) via a `capture-memory` skill + a global standing instruction, writing through `captureOrMerge` (`add`) / `edit`. Session-end sweep deferred (optional Phase 4 fallback) |
 | 6 | Retrieval model | Auto per-turn (bm25-gated) **+** explicit `recall_memory` tool (ungated, includes archived) |
 | 7 | Scope model | Merged, project-scoped: retrieval searches `global` + current project only |
 | 8 | Scope-key granularity | **Git repo root** (`git rev-parse --show-toplevel`), fallback to cwd. Identifier only — repo is never written to |
@@ -141,16 +141,20 @@ Four touchpoints:
 - Auto-revives archived hits (bumps recall + flips to active).
 - Provides an explicit-recall path.
 
-### ④ Capture — hybrid, all through `captureOrMerge`
-- **Inline:** `memory_add` tool Claude calls mid-session when it judges something
-  durable. Claude sets `scope` (project-specific → `<repo-key>`; about-user /
-  cross-project → `global`) and `type`.
-- **Session-end sweep:** `Stop`/`SessionEnd` hook fires **one** extraction pass over
-  the transcript (the only recurring per-session model call), emits candidates in a
-  strict pipe-delimited format, each parsed and run through `captureOrMerge`.
-- `captureOrMerge`: (1) hard-key match → bump `captureHits`; (2) fuzzy-FTS match
-  constrained to **same scope + type**, active then archived (archived match
-  auto-revives); (3) else insert new row.
+### ④ Capture — inline, agent-driven (all through `captureOrMerge`)
+- **Proactive trigger:** a standing instruction in user-global `~/.claude/CLAUDE.md` +
+  the `capture-memory` skill make the in-loop agent save durable, directly-stated user
+  facts on its own judgment (conservative bar), plus on explicit "remember this".
+- **Flow:** the agent recalls similar memories first (semantic-dup / find-to-update),
+  then decides: skip (already covered), `edit` by id (fact changed/wrong), or `add` a
+  new memory. Scope: about-user/cross-project → `global`; project-specific → `--cwd`
+  resolves the `<repo-key>`. Type is one of the allowlist facets.
+- `captureOrMerge` (used by `add`): (1) hard-key match → bump `captureHits`; (2)
+  fuzzy-FTS match constrained to **same scope + type**, active then archived (archived
+  match auto-revives); (3) else insert new row.
+- **Session-end sweep:** deferred — an optional Phase 4 fallback (a `SessionEnd` hook
+  doing one transcript extraction pass) only if inline capture proves leaky; skipped to
+  avoid a per-session full-transcript model-call cost.
 
 ### Management tools (everyday editing path)
 `memory_edit` / `memory_forget` write the DB directly. Hand-editing an export is the
