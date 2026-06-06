@@ -5,10 +5,12 @@ import json
 import sys
 import time
 
-from memory_engine.db import connect
+from memory_engine.backup import backup_if_stale
+from memory_engine.control import is_disabled
+from memory_engine.db import connect, recover_if_corrupt
 from memory_engine.formatting import format_memory_block
 from memory_engine.parser import Parsed
-from memory_engine.paths import default_db_path
+from memory_engine.paths import default_db_path, backups_dir
 from memory_engine.repository import MemoryRepository, RETRIEVE_K
 from memory_engine.scope import resolve_scope_key, scopes_for
 
@@ -39,6 +41,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("stats")
     sub.add_parser("sweep")
     sub.add_parser("inject")  # UserPromptSubmit hook entry; reads JSON on stdin
+    sub.add_parser("session-init")  # SessionStart hook entry; reads JSON on stdin
 
     p_edit = sub.add_parser("edit")
     p_edit.add_argument("--id", type=int, required=True)
@@ -54,6 +57,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.cmd == "inject":
         return _run_inject(args.db)
+    if args.cmd == "session-init":
+        return _run_session_init(args.db)
     conn = connect(args.db or default_db_path())
     repo = MemoryRepository(conn, clock=_real_clock)
 
@@ -97,6 +102,8 @@ def _run_inject(db: str | None) -> int:
     memories as additionalContext, and ALWAYS returns 0 — a non-zero/blocking exit
     on this event would erase the user's prompt. Any failure → emit nothing."""
     try:
+        if is_disabled():
+            return 0
         data = json.loads(sys.stdin.read())
         prompt = (data.get("prompt") or "").strip()
         cwd = data.get("cwd") or "."
@@ -117,6 +124,29 @@ def _run_inject(db: str | None) -> int:
         return 0
     except Exception:
         return 0  # fail-open: never block a turn
+
+
+def _run_session_init(db: str | None) -> int:
+    """SessionStart hook body: kill-switch check → recover-if-corrupt → archival sweep →
+    backup-if-stale. ALWAYS returns 0 — must never block a session from starting."""
+    try:
+        if is_disabled():
+            return 0
+        try:
+            _ = sys.stdin.read()  # drain stdin (source/cwd available but unused here)
+        except Exception:
+            pass
+        path = db or default_db_path()
+        recover_if_corrupt(path, backups_dir())
+        conn = connect(path)
+        try:
+            MemoryRepository(conn, clock=_real_clock).run_archival_sweep()
+        finally:
+            conn.close()
+        backup_if_stale(path, backups_dir(), now_ms=_real_clock())
+        return 0
+    except Exception:
+        return 0  # fail-open: never block session start
 
 
 if __name__ == "__main__":
