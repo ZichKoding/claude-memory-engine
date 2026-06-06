@@ -11,19 +11,23 @@ without being asked. Keep a CONSERVATIVE bar — capture clear, directly-stated,
 facts; skip transient chitchat, one-off task details, and your own inferences/guesses.
 (If the user explicitly says "remember this", always save it.)
 
-## Flow
+## Flow — ALWAYS recall before you add
 
-1. **Check for an existing memory first** (avoid semantic duplicates / find the row to update):
+This recall-then-decide step is how duplicates are avoided: the engine only auto-merges
+*exact* re-captures, so a reworded near-duplicate would create a NEW row unless you catch
+it here. **You are the semantic-dedup layer.**
+
+1. **Search for an existing memory first:**
    ```bash
    memory-engine recall --query "<key terms of the fact>" --cwd "<current working directory>"
    ```
-2. **Decide:**
-   - Already captured and still accurate → do nothing.
-   - The fact CHANGED or was wrong → update the existing row by its id:
+2. **Decide based on what recall returns:**
+   - Already captured and still accurate → **do nothing.**
+   - Same fact but it CHANGED or was wrong → **update** the existing row by id:
      ```bash
      memory-engine edit --id <id> --body "<corrected fact>"
      ```
-   - Genuinely new → add it (see scope + type below).
+   - Genuinely new (recall shows nothing equivalent) → **add** it (scope + type below).
 
 3. **Add a new memory:**
    ```bash
@@ -35,7 +39,8 @@ facts; skip transient chitchat, one-off task details, and your own inferences/gu
 
 - `--type` is one of: fact, preference, person, goal, project, other.
 - Keep `body` self-contained (don't rely on conversation context to interpret it).
-- `add` is dedup-safe — re-adding the same fact just reinforces it, so when unsure, prefer
-  adding over losing the fact.
+- Dedup is EXACT (scope + type + normalized body): an identical re-add just reinforces the
+  existing memory; a paraphrase makes a new row. So don't blind-add — step 1 (recall +
+  judge) is what prevents near-duplicates.
 
 Do this quietly as part of the conversation; don't announce every save.

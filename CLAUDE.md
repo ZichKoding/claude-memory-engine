@@ -4,13 +4,13 @@ A local memory engine for Claude Code: a standalone SQLite layer (FTS5 + bm25
 + counters + lifecycle) that surfaces relevant memories per turn at global and
 project scope. **Decoupled** from Claude Code's `MEMORY.md` — purely additive.
 
+- Overview / usage: `README.md`
 - Spec: `docs/superpowers/specs/2026-06-05-claude-code-memory-engine-design.md`
 - Plan (Phase 1): `docs/superpowers/plans/2026-06-05-memory-engine-phase1-core-db.md`
 - Claude Code setup (skills, hook, standing instruction): `claude-integration/INSTALL.md`
-- Status: **Phases 1, 2a (auto-retrieval hook), 2b (explicit recall CLI+skill) merged**
-  on `main`; **Phase 3 (inline capture) implemented** on `phase-3-inline-capture`.
-  Remaining: Phase 4 (SessionStart archival/backup, kill switch, calibrated relevance
-  gating, counter-snapshot hardening; optional session-end capture sweep fallback).
+- Status: **Phases 1–3 + the Claude Code integration bundle merged** on `main`; the
+  exact-only dedup fix is in **PR #4**. Remaining: Phase 4 (SessionStart archival/backup,
+  kill switch, calibrated relevance gating; optional near-dup `consolidate` pass).
 
 ## Tooling (Windows)
 
