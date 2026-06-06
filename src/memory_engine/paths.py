@@ -11,3 +11,10 @@ def default_db_path() -> str:
     directory = Path.home() / ".claude" / "memory"
     directory.mkdir(parents=True, exist_ok=True)
     return str(directory / "memory.db")
+
+
+def backups_dir() -> str:
+    """`~/.claude/memory/backups/`, created if missing."""
+    directory = Path.home() / ".claude" / "memory" / "backups"
+    directory.mkdir(parents=True, exist_ok=True)
+    return str(directory)
