@@ -89,3 +89,14 @@ project scope. **Decoupled** from Claude Code's `MEMORY.md` — purely additive.
 - Hooks load at session start — config changes require a restart/resume to take effect.
 - Kill switch (interim): remove the `UserPromptSubmit` block from
   `~/.claude/settings.json`. A flag-based switch is Phase 4.
+
+## Explicit recall (Phase 2b)
+
+- `memory-engine recall --query "…" [--cwd "…"]` runs an explicit, on-demand search
+  (active **+** archived, ungated) across global + the given project; omit `--cwd` for
+  global only.
+- Surfaced to the model by a user-level skill `~/.claude/skills/recall-memory/SKILL.md`
+  (discoverable + auto-triggering) that shells out to the CLI. `Bash(memory-engine*)`
+  is allowlisted in `~/.claude/settings.json` so it runs without prompts.
+- No MCP server — the model invokes the existing CLI via Bash. To disable: remove the
+  skill dir and/or the allowlist entry.
