@@ -10,7 +10,7 @@ from memory_engine.formatting import format_memory_block
 from memory_engine.parser import Parsed
 from memory_engine.paths import default_db_path
 from memory_engine.repository import MemoryRepository, RETRIEVE_K
-from memory_engine.scope import scopes_for
+from memory_engine.scope import resolve_scope_key, scopes_for
 
 
 def _real_clock() -> int:
@@ -24,7 +24,10 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_add = sub.add_parser("add")
-    for f in ("scope", "type", "name", "description", "body"):
+    p_add.add_argument("--scope", default="global")
+    p_add.add_argument("--cwd", default=None,
+                       help="if given, scope = this project's key (overrides --scope)")
+    for f in ("type", "name", "description", "body"):
         p_add.add_argument(f"--{f}", required=True)
 
     p_search = sub.add_parser("search")
@@ -36,6 +39,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("stats")
     sub.add_parser("sweep")
     sub.add_parser("inject")  # UserPromptSubmit hook entry; reads JSON on stdin
+
+    p_edit = sub.add_parser("edit")
+    p_edit.add_argument("--id", type=int, required=True)
+    for f in ("type", "name", "description", "body"):
+        p_edit.add_argument(f"--{f}", default=None)
 
     p_recall = sub.add_parser("recall")
     p_recall.add_argument("--query", required=True)
@@ -50,8 +58,9 @@ def main(argv: list[str] | None = None) -> int:
     repo = MemoryRepository(conn, clock=_real_clock)
 
     if args.cmd == "add":
+        scope = resolve_scope_key(args.cwd) if args.cwd else args.scope
         outcome = repo.capture_or_merge(
-            Parsed(args.type, args.name, args.description, args.body), scope=args.scope)
+            Parsed(args.type, args.name, args.description, args.body), scope=scope)
         print(type(outcome).__name__, getattr(outcome, "id", ""))
     elif args.cmd == "search":
         scopes = [s.strip() for s in args.scopes.split(",") if s.strip()]
@@ -67,6 +76,13 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"total": total, "active": active, "archived": total - active}))
     elif args.cmd == "sweep":
         print(json.dumps({"archived": repo.run_archival_sweep()}))
+    elif args.cmd == "edit":
+        result = repo.edit(args.id, type=args.type, name=args.name,
+                           description=args.description, body=args.body)
+        messages = {"updated": f"Updated memory {args.id}",
+                    "not_found": f"Memory {args.id} not found",
+                    "conflict": f"Edit would duplicate an existing memory; memory {args.id} unchanged"}
+        print(messages[result])
     elif args.cmd == "recall":
         scopes = scopes_for(args.cwd) if args.cwd else ["global"]
         memories = repo.retrieve_explicit(args.query, scopes=scopes, k=args.limit)
