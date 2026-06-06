@@ -57,6 +57,34 @@ class MemoryRepository:
         self._conn.commit()
         return Inserted(cur.lastrowid)
 
+    def edit(self, id_: int, *, type: str | None = None, name: str | None = None,
+             description: str | None = None, body: str | None = None) -> str:
+        """Update fields of an existing memory by id. Only the provided fields change;
+        scope is immutable (it's identity). Recomputes normalizedKey from the (unchanged)
+        scope + the resulting type/body, and touches updatedAt. The FTS index re-syncs
+        via the UPDATE trigger. Returns 'updated', 'not_found', or 'conflict' (the new
+        normalizedKey would duplicate another row's UNIQUE key)."""
+        row = self._conn.execute("SELECT * FROM memories WHERE id=?", (id_,)).fetchone()
+        if row is None:
+            return "not_found"
+        new_type = type if type is not None else row["type"]
+        new_name = name if name is not None else row["name"]
+        new_desc = description if description is not None else row["description"]
+        new_body = body if body is not None else row["body"]
+        new_key = normalized_key(row["scope"], new_type, new_body)
+        now = self._clock()
+        try:
+            self._conn.execute(
+                "UPDATE memories SET type=?, name=?, description=?, body=?, "
+                "normalizedKey=?, updatedAt=? WHERE id=?",
+                (new_type, new_name, new_desc, new_body, new_key, now, id_),
+            )
+            self._conn.commit()
+        except sqlite3.IntegrityError:
+            self._conn.rollback()  # clear the failed UPDATE's open transaction
+            return "conflict"  # new key collides with an existing row's UNIQUE key
+        return "updated"
+
     def _bump_capture_hit(self, id_: int, now: int) -> None:
         self._conn.execute(
             "UPDATE memories SET captureHits=captureHits+1, lastUsedAt=?, "

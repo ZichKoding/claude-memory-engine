@@ -1,0 +1,25 @@
+{
+  "_comment": "MERGE these two blocks into your ~/.claude/settings.json (do not overwrite the whole file). 'permissions.allow' lets the recall/capture skills run memory-engine without a prompt; 'hooks.UserPromptSubmit' wires per-turn auto-retrieval. The hook command uses the PATH-resolved 'memory-engine'; if Claude Code can't resolve it on Windows, use the absolute path to the uv-tool shim instead, e.g. C:/Users/<you>/.local/bin/memory-engine.exe",
+
+  "permissions": {
+    "allow": [
+      "Bash(memory-engine*)"
+    ]
+  },
+
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "memory-engine",
+            "args": ["inject"],
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

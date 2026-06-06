@@ -6,10 +6,11 @@ project scope. **Decoupled** from Claude Code's `MEMORY.md` — purely additive.
 
 - Spec: `docs/superpowers/specs/2026-06-05-claude-code-memory-engine-design.md`
 - Plan (Phase 1): `docs/superpowers/plans/2026-06-05-memory-engine-phase1-core-db.md`
-- Status: **Phase 1 complete** on `main`; **Phase 2a (auto-retrieval + UserPromptSubmit
-  hook) implemented** on `phase-2a-auto-retrieval`. Remaining: Phase 2b (`recall_memory`
-  MCP server), Phase 3 (capture wiring), Phase 4 (SessionStart archival/backup, kill
-  switch, calibrated relevance gating).
+- Claude Code setup (skills, hook, standing instruction): `claude-integration/INSTALL.md`
+- Status: **Phases 1, 2a (auto-retrieval hook), 2b (explicit recall CLI+skill) merged**
+  on `main`; **Phase 3 (inline capture) implemented** on `phase-3-inline-capture`.
+  Remaining: Phase 4 (SessionStart archival/backup, kill switch, calibrated relevance
+  gating, counter-snapshot hardening; optional session-end capture sweep fallback).
 
 ## Tooling (Windows)
 
@@ -46,6 +47,11 @@ project scope. **Decoupled** from Claude Code's `MEMORY.md` — purely additive.
   the table has only one row — it would pass even with the filter deleted. Populate
   the adversarial case. (This is a Phase 1 lesson: a one-row fixture hid a real
   dedup bug that only the final holistic review caught.)
+- **Same scope+type multi-row fixtures MUST use token-disjoint bodies.** Capture-time
+  fuzzy dedup merges same-scope+type rows that share any ≥3-char token, silently
+  collapsing the fixture to one row (this bit Phase 2a twice and Phase 3 once). Use
+  disjoint tokens (e.g. `"alpha"`/`"bravo"`), or distinct types/scopes, so the rows
+  actually persist.
 - **Before implementing a plan with non-trivial logic, run the `plan-redteam` agent**
   (user-level) over it. Spec-compliance review cannot catch a wrong spec.
 - Use the in-memory SQLite `conn` fixture and the injected `clock` fixture
@@ -69,9 +75,11 @@ project scope. **Decoupled** from Claude Code's `MEMORY.md` — purely additive.
 - `models.py` — `Memory` row, `Inserted`/`MergedByKey`/`MergedByFuzzy` outcomes.
 - `db.py` — `SCHEMA_SQL`, `connect`, `init_db` (FTS5 external-content + triggers).
 - `repository.py` — `MemoryRepository`: `capture_or_merge` (2-stage dedup), `search`,
-  `bump_recall`, `run_archival_sweep` (clock injected for tests).
-- `cli.py` — driver + hook entry: `add`/`list`/`search`/`stats`/`sweep` plus `inject`
-  (the UserPromptSubmit hook body, fail-open). `--db` defaults to the self-resolved path.
+  `retrieve` (auto top-k), `retrieve_explicit` (active+archived), `edit`, `bump_recall`,
+  `run_archival_sweep` (clock injected for tests).
+- `cli.py` — driver + hook entry: `add` (`--cwd` scope), `edit`, `list`/`search`/`stats`/
+  `sweep`, `recall` (explicit), plus `inject` (the UserPromptSubmit hook body, fail-open).
+  `--db` defaults to the self-resolved path.
 - `paths.py` — `default_db_path()` → `~/.claude/memory/memory.db`.
 - `scope.py` — `resolve_scope_key`/`scopes_for` (git repo root, cwd fallback).
 - `formatting.py` — `format_memory_block` → the injected `<memory>` block.
@@ -100,3 +108,13 @@ project scope. **Decoupled** from Claude Code's `MEMORY.md` — purely additive.
   is allowlisted in `~/.claude/settings.json` so it runs without prompts.
 - No MCP server — the model invokes the existing CLI via Bash. To disable: remove the
   skill dir and/or the allowlist entry.
+
+## Inline capture (Phase 3)
+
+- Capture is **inline + agent-driven** (no session-end sweep). A standing instruction in
+  user-global `~/.claude/CLAUDE.md` + the `~/.claude/skills/capture-memory/SKILL.md` skill
+  make the agent proactively save durable, directly-stated user facts (conservative bar)
+  via `memory-engine add` (global) / `add --cwd <dir>` (project) — through `capture_or_merge`.
+- Corrections use `memory-engine edit --id N --body "…"` (recomputes the dedup key, FTS
+  re-syncs; conflict-safe — returns `updated`/`not_found`/`conflict`).
+- The session-end sweep is a deferred optional Phase 4 fallback, not built.
