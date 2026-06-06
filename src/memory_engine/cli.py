@@ -37,6 +37,12 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("sweep")
     sub.add_parser("inject")  # UserPromptSubmit hook entry; reads JSON on stdin
 
+    p_recall = sub.add_parser("recall")
+    p_recall.add_argument("--query", required=True)
+    p_recall.add_argument("--cwd", default=None,
+                          help="project dir to scope to; omit for global-only")
+    p_recall.add_argument("--limit", type=int, default=RETRIEVE_K)
+
     args = parser.parse_args(argv)
     if args.cmd == "inject":
         return _run_inject(args.db)
@@ -61,6 +67,11 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"total": total, "active": active, "archived": total - active}))
     elif args.cmd == "sweep":
         print(json.dumps({"archived": repo.run_archival_sweep()}))
+    elif args.cmd == "recall":
+        scopes = scopes_for(args.cwd) if args.cwd else ["global"]
+        memories = repo.retrieve_explicit(args.query, scopes=scopes, k=args.limit)
+        block = format_memory_block(memories)
+        print(block if block else "No matching memories found.")
     conn.close()
     return 0
 

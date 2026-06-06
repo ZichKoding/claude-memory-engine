@@ -122,6 +122,37 @@ class MemoryRepository:
                                     recallHits=m.recallHits + 1, lastUsedAt=now)
                 for m in archived]
 
+    def _search_any_status(self, text: str, scopes: list[str], k: int) -> list[Memory]:
+        """Scope-filtered FTS search across ALL statuses (active + archived),
+        bm25-ranked, best first. Empty when text yields no query or scopes is empty."""
+        fuzzy = from_user_text(text)
+        if fuzzy is None or not scopes:
+            return []
+        placeholders = ",".join("?" for _ in scopes)
+        sql = (
+            "SELECT m.* FROM memories m JOIN memories_fts f ON f.rowid=m.id "
+            f"WHERE memories_fts MATCH ? AND m.scope IN ({placeholders}) "
+            "ORDER BY bm25(memories_fts) ASC LIMIT ?"
+        )
+        try:
+            rows = self._conn.execute(sql, (fuzzy, *scopes, k)).fetchall()
+        except sqlite3.OperationalError:
+            return []
+        return [self._to_memory(r) for r in rows]
+
+    def retrieve_explicit(self, text: str, scopes: list[str], k: int = RETRIEVE_K) -> list[Memory]:
+        """Explicit on-demand recall: active + archived union, bm25-ranked, ungated
+        (the model asked, so no relevance pre-filter beyond k). Revives archived hits
+        and bumps recallHits on everything served; returns post-revive state."""
+        rows = self._search_any_status(text, scopes, k)
+        if not rows:
+            return []
+        now = self._clock()
+        self.bump_recall([m.id for m in rows])  # also flips status='active' on archived hits
+        return [dataclasses.replace(m, status=STATUS_ACTIVE,
+                                    recallHits=m.recallHits + 1, lastUsedAt=now)
+                for m in rows]
+
     def bump_recall(self, ids: list[int]) -> None:
         """Bump recallHits + lastUsedAt and revive (status='active') served rows."""
         if not ids:
