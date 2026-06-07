@@ -52,3 +52,10 @@ def test_prunes_to_retention(tmp_path):
 
 def test_missing_db_is_noop(tmp_path):
     assert backup_if_stale(str(tmp_path / "nope.db"), str(tmp_path / "b"), now_ms=HOUR_MS) is False
+
+
+def test_never_raises_on_non_sqlite_db(tmp_path):
+    # db_path exists but is not a valid SQLite file → VACUUM INTO raises sqlite3.Error.
+    # The documented contract is fail-soft: return False, never propagate.
+    bad = tmp_path / "m.db"; bad.write_bytes(b"this is not a database")
+    assert backup_if_stale(str(bad), str(tmp_path / "backups"), now_ms=HOUR_MS) is False

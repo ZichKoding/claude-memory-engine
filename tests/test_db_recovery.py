@@ -74,3 +74,14 @@ def test_corrupt_db_no_backup_recreates_empty(tmp_path):
 
 def test_missing_db_is_ok(tmp_path):
     assert recover_if_corrupt(str(tmp_path / "nope.db"), str(tmp_path / "b")) == "ok"
+
+
+def test_quarantine_does_not_clobber_prior_corrupt_file(tmp_path):
+    # A previous corruption already left a .corrupt-0 quarantine. A new corruption must
+    # NOT overwrite it (that would be silent data loss) — it gets the next free index.
+    db = str(tmp_path / "m.db"); _good_db(db)
+    prior = Path(db + ".corrupt-0"); prior.write_bytes(b"earlier quarantined corrupt db")
+    Path(db).write_bytes(b"newly corrupt garbage")
+    assert recover_if_corrupt(db, str(tmp_path / "backups")) == "recreated"
+    assert prior.read_bytes() == b"earlier quarantined corrupt db"  # untouched
+    assert Path(db + ".corrupt-1").exists()                          # new quarantine, fresh index

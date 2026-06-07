@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 import time
+import traceback
 
 from memory_engine.backup import backup_if_stale
 from memory_engine.control import is_disabled
@@ -123,7 +124,10 @@ def _run_inject(db: str | None) -> int:
             }}))
         return 0
     except Exception:
-        return 0  # fail-open: never block a turn
+        # fail-open: never block a turn. Leave a stderr breadcrumb (stdout is reserved
+        # for the hook JSON) so a real logic bug isn't indistinguishable from "no match".
+        traceback.print_exc(file=sys.stderr)
+        return 0
 
 
 def _run_session_init(db: str | None) -> int:
@@ -137,7 +141,13 @@ def _run_session_init(db: str | None) -> int:
         except Exception:
             pass
         path = db or default_db_path()
-        recover_if_corrupt(path, backups_dir())
+        outcome = recover_if_corrupt(path, backups_dir())
+        if outcome != "ok":
+            # a destructive event the user should know about: their DB was rolled back to a
+            # backup ('restored') or replaced with an empty schema ('recreated', old file
+            # quarantined to <path>.corrupt-N). stderr only — stdout is the hook channel.
+            print(f"memory-engine: DB recovery -> {outcome} "
+                  f"(corrupt file quarantined under {path}.corrupt-*)", file=sys.stderr)
         conn = connect(path)
         try:
             MemoryRepository(conn, clock=_real_clock).run_archival_sweep()
@@ -146,7 +156,10 @@ def _run_session_init(db: str | None) -> int:
         backup_if_stale(path, backups_dir(), now_ms=_real_clock())
         return 0
     except Exception:
-        return 0  # fail-open: never block session start
+        # fail-open: never block session start. A stderr breadcrumb (e.g. a quarantine that
+        # failed mid-recovery, leaving the corrupt DB in place) is the only signal available.
+        traceback.print_exc(file=sys.stderr)
+        return 0
 
 
 if __name__ == "__main__":
