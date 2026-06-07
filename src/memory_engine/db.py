@@ -2,7 +2,12 @@
 """SQLite connection + schema. The `.md` files are NOT involved here — the DB is
 its own system of record (see spec). FTS5 external-content table mirrors the three
 text columns; triggers keep it in sync."""
+import os
+import shutil
 import sqlite3
+from pathlib import Path
+
+from memory_engine.backup import _stamp_of  # single source of truth for the memory-<ms>.db stamp
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS memories (
@@ -58,3 +63,42 @@ def connect(path: str) -> sqlite3.Connection:
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA_SQL)
     conn.commit()
+
+
+def _is_healthy(path: str) -> bool:
+    try:
+        conn = sqlite3.connect(path)
+        try:
+            return conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        finally:
+            conn.close()
+    except sqlite3.DatabaseError:
+        return False
+
+
+def recover_if_corrupt(path: str, backups_dir: str) -> str:
+    """Boot-time integrity guard. If `path` is missing or healthy → 'ok'. If corrupt:
+    quarantine it to `<path>.corrupt-<n>`, then restore from the newest HEALTHY backup
+    ('restored') or, if none works, recreate an empty schema ('recreated'). Best-effort —
+    the caller (`session-init`) wraps it in fail-open; do not assume it never raises."""
+    if not os.path.exists(path):
+        return "ok"
+    if _is_healthy(path):
+        return "ok"
+    # quarantine the corrupt file under a non-colliding name (never delete user data)
+    n = 0
+    while os.path.exists(f"{path}.corrupt-{n}"):
+        n += 1
+    os.replace(path, f"{path}.corrupt-{n}")
+    # restore from the newest HEALTHY backup (a corrupt newest snapshot must not win),
+    # and re-verify the restored copy; else fall through to recreate. Sort by the numeric
+    # epoch-ms stamp (not lexicographic) to stay consistent with backup.py's ordering.
+    if os.path.isdir(backups_dir):
+        for b in sorted(Path(backups_dir).glob("memory-*.db"),
+                        key=lambda p: (_stamp_of(p) or 0), reverse=True):
+            if _is_healthy(str(b)):
+                shutil.copyfile(str(b), path)
+                if _is_healthy(path):
+                    return "restored"
+    connect(path).close()  # no healthy backup → recreate empty schema
+    return "recreated"

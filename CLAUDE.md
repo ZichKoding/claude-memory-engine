@@ -8,9 +8,10 @@ project scope. **Decoupled** from Claude Code's `MEMORY.md` — purely additive.
 - Spec: `docs/superpowers/specs/2026-06-05-claude-code-memory-engine-design.md`
 - Plan (Phase 1): `docs/superpowers/plans/2026-06-05-memory-engine-phase1-core-db.md`
 - Claude Code setup (skills, hook, standing instruction): `claude-integration/INSTALL.md`
-- Status: **Phases 1–3 + the Claude Code integration bundle merged** on `main`; the
-  exact-only dedup fix is in **PR #4**. Remaining: Phase 4 (SessionStart archival/backup,
-  kill switch, calibrated relevance gating; optional near-dup `consolidate` pass).
+- Status: **Phases 1–3 + the Claude Code integration bundle merged** on `main`.
+  **Phase 4a (ops safety: kill switch, backups, corruption recovery, SessionStart hook)**
+  is built on branch `phase-4a-ops-safety`. Remaining: Phase 4b (calibrated relevance
+  gating; optional near-dup `consolidate` pass) — deferred until a real-usage period.
 
 ## Tooling (Windows)
 
@@ -96,8 +97,24 @@ project scope. **Decoupled** from Claude Code's `MEMORY.md` — purely additive.
   `hookSpecificOutput.additionalContext`, and is fail-open (always exit 0) so it can
   never block a turn.
 - Hooks load at session start — config changes require a restart/resume to take effect.
-- Kill switch (interim): remove the `UserPromptSubmit` block from
-  `~/.claude/settings.json`. A flag-based switch is Phase 4.
+- Kill switch: see Phase 4a below.
+
+## Ops safety (Phase 4a)
+
+- **Master kill switch** (`control.is_disabled()`): env `MEMORY_ENGINE_DISABLED` in
+  `{1,true,yes,on}` **or** the file `~/.claude/memory/DISABLED`. Checked by BOTH `inject`
+  (per turn) and `session-init` (boot); when set, both no-op and exit 0 — no restart needed.
+- **`SessionStart` hook** runs `memory-engine session-init` (in `~/.claude/settings.json`
+  AND `claude-integration/settings.snippet.json`): kill-switch check → `recover_if_corrupt`
+  → archival sweep → `backup_if_stale`. ALWAYS exits 0 (fail-open) — never blocks a session.
+- **Backups** (`backup.py`): `VACUUM INTO ~/.claude/memory/backups/memory-<epoch_ms>.db`,
+  stale-gated (≤ once/24h), newest 7 retained. The expensive maintenance runs once at boot,
+  NOT per turn — `inject` only gained a cheap kill-switch check.
+- **Corruption recovery** (`db.recover_if_corrupt`, boot-only): `PRAGMA integrity_check`;
+  if corrupt, quarantine the live file to `<path>.corrupt-<n>` (never deleted), restore from
+  the newest **healthy** backup (re-verified), else recreate an empty schema. Detects gross
+  corruption only; subtle in-page corruption may pass and is out of scope.
+- Recovery runs ONLY at boot (`session-init`), never in `connect()` — keeps `inject` cheap.
 
 ## Explicit recall (Phase 2b)
 

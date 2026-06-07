@@ -1,5 +1,5 @@
 {
-  "_comment": "MERGE these two blocks into your ~/.claude/settings.json (do not overwrite the whole file). 'permissions.allow' lets the recall/capture skills run memory-engine without a prompt; 'hooks.UserPromptSubmit' wires per-turn auto-retrieval. The hook command uses the PATH-resolved 'memory-engine'; if Claude Code can't resolve it on Windows, use the absolute path to the uv-tool shim instead, e.g. C:/Users/<you>/.local/bin/memory-engine.exe",
+  "_comment": "MERGE these blocks into your ~/.claude/settings.json (do not overwrite the whole file). 'permissions.allow' lets the recall/capture skills run memory-engine without a prompt; 'hooks.UserPromptSubmit' wires per-turn auto-retrieval; 'hooks.SessionStart' runs boot-time maintenance (corruption-recovery + archival sweep + stale-gated backup), fail-open. The hook command uses the PATH-resolved 'memory-engine'; if Claude Code can't resolve it on Windows, use the absolute path to the uv-tool shim instead, e.g. C:/Users/<you>/.local/bin/memory-engine.exe. Off switch: set MEMORY_ENGINE_DISABLED=1 or create ~/.claude/memory/DISABLED to make both hooks no-op instantly.",
 
   "permissions": {
     "allow": [
@@ -17,6 +17,19 @@
             "command": "memory-engine",
             "args": ["inject"],
             "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "memory-engine",
+            "args": ["session-init"],
+            "timeout": 60
           }
         ]
       }
