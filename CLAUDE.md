@@ -1,8 +1,10 @@
 # claude-memory-engine
 
-A local memory engine for Claude Code: a standalone SQLite layer (FTS5 + bm25
-+ counters + lifecycle) that surfaces relevant memories per turn at global and
-project scope. **Decoupled** from Claude Code's `MEMORY.md` — purely additive.
+**CRAM — Capture & Retrieval-Augmented Memory for Claude Code.** A local memory engine
+(standalone SQLite layer: FTS5 + bm25 + counters + lifecycle) that **captures** durable
+facts and surfaces the relevant ones per turn at global and project scope. **Decoupled**
+from Claude Code's `MEMORY.md` — purely additive. (CRAM is the concept/brand; the package
+and CLI stay named `memory-engine`.)
 
 - Overview / usage: `README.md`
 - Spec: `docs/superpowers/specs/2026-06-05-claude-code-memory-engine-design.md`
