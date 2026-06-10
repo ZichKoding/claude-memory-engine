@@ -1,13 +1,16 @@
-# memory-engine — long-term memory for Claude Code
+# memory-engine — CRAM: Capture & Retrieval-Augmented Memory for Claude Code
 
-**Persistent, local, per-project long-term memory for [Claude Code](https://www.anthropic.com/claude-code).**
-A small SQLite + FTS5 engine that (1) **auto-injects** relevant memories into every turn,
-(2) lets the agent **explicitly recall** them on demand, and (3) **captures** durable
-facts about you and your work — automatically, as you talk. It runs entirely on your
-machine, is decoupled from Claude Code's built-in `MEMORY.md`, and needs **no MCP server**.
+**CRAM** — *Capture & Retrieval-Augmented Memory* — is persistent, local, per-project
+long-term memory for [Claude Code](https://www.anthropic.com/claude-code). A small
+SQLite + FTS5 engine that (1) **captures** durable facts about you and your work —
+automatically, as you talk, (2) **auto-injects** the relevant ones into every turn
+(retrieval-augmented), and (3) lets the agent **explicitly recall** them on demand. It
+runs entirely on your machine, is decoupled from Claude Code's built-in `MEMORY.md`, and
+needs **no MCP server**. (The package and CLI are named `memory-engine` — CRAM is the concept.)
 
-> Keywords: Claude Code memory · persistent agent memory · long-term memory for AI agents ·
-> SQLite FTS5 memory store · Claude Code hook + skill · local/offline memory · RAG over personal facts
+> Keywords: CRAM · Capture & Retrieval-Augmented Memory · Claude Code memory · persistent
+> agent memory · long-term memory for AI agents · SQLite FTS5 memory store ·
+> Claude Code hook + skill · local/offline memory · RAG over personal facts
 
 ---
 
